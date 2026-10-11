@@ -2,6 +2,50 @@
 
 四人分工与一个月实施计划。团队规模：4 人；实施周期：约 4 周。
 
+## 仓库结构与开发起步
+
+当前仓库提供基础目录、配置模板和接口草案，尚未实现候选生成、验证、评估或完整 Agent 运行入口。
+
+```text
+RTL-agent-optimizer/
+├── README.md
+├── requirements.txt       # 框架确定后补充实际 Python 依赖
+├── .gitignore
+├── .env.example           # 模型配置模板
+├── tools.env.example      # WSL 工具与库路径模板
+├── src/
+│   ├── controller/        # A：主控与集成
+│   ├── verification/      # B：等价验证
+│   ├── evaluation/        # C：综合与性能评估
+│   └── optimization/      # D：候选生成与反馈策略
+├── tests/                 # 模块测试与联调
+├── benchmarks/public/     # 待导入课程公开原始 RTL
+├── configs/               # 待确认的统一配置与约束
+├── experiments/           # 精选候选、摘要与复现说明
+└── docs/
+    ├── interfaces.md      # 第一周接口草案
+    └── weekly/            # 周计划与会议纪要模板
+```
+
+基础工具安装完成后，在 WSL / Ubuntu 中执行：
+
+```bash
+git clone https://github.com/Tigrisz/RTL-agent-optimizer.git
+cd RTL-agent-optimizer
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
+cp tools.env.example tools.env
+```
+
+填写本地配置；基础骨架尚不会自动加载这些文件。requirements.txt 当前只有说明，确定框架后由负责人添加经过验证的依赖版本。
+真实 API Key、机器路径及临时运行输出不提交；精选实验按 [实验记录说明](experiments/README.md) 整理。
+
+开始开发前，全组确认 [接口约定](docs/interfaces.md) 和 [统一配置清单](configs/README.md)。
+每项任务从最新 main 创建独立分支，通过 PR 说明修改与实际验证后合并；公共接口变化提前通知相关成员。
+周计划与周会记录使用 [模板](docs/weekly/template.md)。
+
 | 项目目标<br>搭建自动化 RTL 优化 Agent：输入原始 RTL，生成候选实现，完成等价性验证及综合评估，在满足延时要求的前提下尽量缩小面积；通过多轮反馈迭代，输出最优有效 RTL 与评估报告。具体大模型暂不预设。 |
 
 ## 环境配置

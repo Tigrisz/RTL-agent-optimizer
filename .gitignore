@@ -1,0 +1,31 @@
+# 本地模型密钥与工具路径（保留示例模板）
+.env
+.env.*
+!.env.example
+tools.env
+
+# Python 环境与缓存
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# 临时运行输出；精选结果放入 experiments/ 后单独提交
+/runs/
+/tmp/
+*.vcd
+*.fst
+
+# 本地编辑器与系统文件
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
