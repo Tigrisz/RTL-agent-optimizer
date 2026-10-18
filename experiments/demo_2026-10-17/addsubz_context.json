@@ -1,0 +1,12 @@
+{
+  "design_id": "opti_demo/addsubz",
+  "top": "TopModule",
+  "circuit_type": "combinational",
+  "parameters": {},
+  "constraints": {
+    "preserve_interface": true,
+    "preserve_cycles": true,
+    "delay_limit": null,
+    "delay_unit": null
+  }
+}

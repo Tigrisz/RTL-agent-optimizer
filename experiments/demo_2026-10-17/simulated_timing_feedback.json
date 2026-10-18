@@ -1,0 +1,13 @@
+{
+  "is_mock": true,
+  "candidate_id": "75d8e5d954cf45f794c8e4d6ec5e5e11",
+  "note": "模拟延时违规，只检查策略切换；不是该候选的真实测量或验证结论。",
+  "verify": null,
+  "evaluate": {
+    "status": "success",
+    "timing_met": false
+  },
+  "tried_strategies": [
+    "area_simplify"
+  ]
+}

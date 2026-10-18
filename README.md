@@ -4,7 +4,7 @@
 
 ## 仓库结构与开发起步
 
-当前仓库提供基础目录、配置模板和接口草案，尚未实现候选生成、验证、评估或完整 Agent 运行入口。
+当前仓库提供基础目录、配置模板和接口草案。D 已实现可独立调用的候选生成、反馈策略、重复检测和运行记录，见 [运行说明](docs/optimization.md)；已在 Demo 上完成真实模型生成，验证、评估及完整 Agent 入口尚未实现。
 
 ```text
 RTL-agent-optimizer/
@@ -39,7 +39,7 @@ cp .env.example .env
 cp tools.env.example tools.env
 ```
 
-填写本地配置；基础骨架尚不会自动加载这些文件。requirements.txt 当前只有说明，确定框架后由负责人添加经过验证的依赖版本。
+填写本地配置；D optimize 会读取 `.env`，其他骨架尚不会自动加载这些文件。D 原型仅使用 Python 标准库。requirements.txt 当前只有说明，确定框架后由负责人添加经过验证的依赖版本。
 真实 API Key、机器路径及临时运行输出不提交；精选实验按 [实验记录说明](experiments/README.md) 整理。
 
 开始开发前，全组确认 [接口约定](docs/interfaces.md) 和 [统一配置清单](configs/README.md)。
