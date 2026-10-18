@@ -114,20 +114,4 @@ top           = top
 
 ## 当前阻塞
 
-- 本机常规 `git push` 无法解析 `github.com`，返回 DNS 错误。
-- 已连接的 GitHub 接口可以读取仓库，但创建分支返回 `403 Resource not accessible by integration`，当前连接没有写权限。
 - 当前没有把假工具测试结果当作真实 Yosys/Icarus 证明；真实工具链可用后还需要重新执行 smoke test（冒烟测试）和 benchmark 回归。
-
-在具备仓库写权限和网络的环境中，可执行：
-
-```bash
-git checkout task-b-verification
-git push -u origin task-b-verification
-```
-
-当前本地提交：
-
-```text
-4f289f0 任务B独立实现初版
-f90b76b 补充任务B联调对齐文档
-```
