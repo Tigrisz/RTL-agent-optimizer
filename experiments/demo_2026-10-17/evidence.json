@@ -1,0 +1,189 @@
+{
+  "generated_on": "2026-10-17",
+  "source_kind": "opti_demo_not_course_cases",
+  "model": "deepseek-v4-pro",
+  "verification": "not_run",
+  "evaluation": "not_run",
+  "note": "Paths rebased for export. post_run_audit was added after improving token-level duplicate detection. Original generation records remain in runs/.",
+  "total_tokens": 1703,
+  "calls": [
+    {
+      "case": "popcount3",
+      "round": 1,
+      "record": {
+        "scope": "opti_demo/popcount3",
+        "context_hash": "90938fee35d02e02f0a314212b7baad31feb924e716ccb40993bb7836d64486f",
+        "source_hash": "7408f1e309adb4ad24a5073124d4559f1f2ce9a2f479fecbdcf0e650eaebcd33",
+        "context": {
+          "design_id": "opti_demo/popcount3",
+          "top": "TopModule",
+          "circuit_type": "combinational",
+          "parameters": {},
+          "constraints": {
+            "preserve_interface": true,
+            "preserve_cycles": true,
+            "delay_limit": null,
+            "delay_unit": null
+          }
+        },
+        "feedback": {
+          "tried_strategies": []
+        },
+        "status": "success",
+        "strategy": "area_simplify",
+        "error_type": null,
+        "error_log": null,
+        "is_mock": false,
+        "feedback_is_mock": false,
+        "is_duplicate": false,
+        "duplicate_of": null,
+        "candidate_hash": "1aa281b9588bb822265287cdd25d93dbdc72cefc8ff8dab34af67853a54d614c",
+        "usage": {
+          "prompt_tokens": 403,
+          "completion_tokens": 45,
+          "total_tokens": 448,
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 403
+        },
+        "elapsed_seconds": 1.401,
+        "run_id": "3f115070a32f457096c68dc49bc1f03e",
+        "model": "deepseek-v4-pro",
+        "model_returned": "deepseek-v4-pro",
+        "created_at": "2026-10-17T10:00:26.435911+00:00",
+        "verification": "not_run",
+        "evaluation": "not_run",
+        "source_path": "popcount3_original.v",
+        "candidate_path": "popcount3_r1.v",
+        "prompt_path": "popcount3_r1_prompt.md",
+        "post_run_audit": {
+          "candidate_fingerprint": "6f7cf09bbc19ce3cb6b1b72ca510a0c52c17008a9501917c5bd55069b09f2a5c",
+          "duplicate_of_original_ignoring_comments_and_formatting": true,
+          "functional_equivalence": "not_tested",
+          "performance_improvement": "not_measured"
+        }
+      }
+    },
+    {
+      "case": "addsubz",
+      "round": 1,
+      "record": {
+        "scope": "opti_demo/addsubz",
+        "context_hash": "7aee0d851d2cde2ab694fc8df390800cb8a9fefe3bbe331c75cc31b521cf2cf9",
+        "source_hash": "c5058cc514cef751bf5b8261a93dc2bab8009e66ebb47bce28f4bd6074991754",
+        "context": {
+          "design_id": "opti_demo/addsubz",
+          "top": "TopModule",
+          "circuit_type": "combinational",
+          "parameters": {},
+          "constraints": {
+            "preserve_interface": true,
+            "preserve_cycles": true,
+            "delay_limit": null,
+            "delay_unit": null
+          }
+        },
+        "feedback": {
+          "tried_strategies": []
+        },
+        "status": "success",
+        "strategy": "area_simplify",
+        "error_type": null,
+        "error_log": null,
+        "is_mock": false,
+        "feedback_is_mock": false,
+        "is_duplicate": true,
+        "duplicate_of": "current_input",
+        "candidate_hash": "c5058cc514cef751bf5b8261a93dc2bab8009e66ebb47bce28f4bd6074991754",
+        "usage": {
+          "prompt_tokens": 444,
+          "completion_tokens": 97,
+          "total_tokens": 541,
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 444
+        },
+        "elapsed_seconds": 1.907,
+        "run_id": "75d8e5d954cf45f794c8e4d6ec5e5e11",
+        "model": "deepseek-v4-pro",
+        "model_returned": "deepseek-v4-pro",
+        "created_at": "2026-10-17T10:00:28.353841+00:00",
+        "verification": "not_run",
+        "evaluation": "not_run",
+        "source_path": "addsubz_original.v",
+        "candidate_path": "addsubz_r1.v",
+        "prompt_path": "addsubz_r1_prompt.md",
+        "post_run_audit": {
+          "candidate_fingerprint": "26221e10b98cd1e71e146380b559f23197e1b1c3c95911765a04a5be240b2e62",
+          "duplicate_of_original_ignoring_comments_and_formatting": true,
+          "functional_equivalence": "not_tested",
+          "performance_improvement": "not_measured"
+        }
+      }
+    },
+    {
+      "case": "addsubz",
+      "round": 2,
+      "record": {
+        "scope": "opti_demo/addsubz",
+        "context_hash": "7aee0d851d2cde2ab694fc8df390800cb8a9fefe3bbe331c75cc31b521cf2cf9",
+        "source_hash": "c5058cc514cef751bf5b8261a93dc2bab8009e66ebb47bce28f4bd6074991754",
+        "context": {
+          "design_id": "opti_demo/addsubz",
+          "top": "TopModule",
+          "circuit_type": "combinational",
+          "parameters": {},
+          "constraints": {
+            "preserve_interface": true,
+            "preserve_cycles": true,
+            "delay_limit": null,
+            "delay_unit": null
+          }
+        },
+        "feedback": {
+          "is_mock": true,
+          "candidate_id": "75d8e5d954cf45f794c8e4d6ec5e5e11",
+          "note": "模拟延时违规，只检查策略切换；不是该候选的真实测量或验证结论。",
+          "verify": null,
+          "evaluate": {
+            "status": "success",
+            "timing_met": false
+          },
+          "tried_strategies": [
+            "area_simplify"
+          ]
+        },
+        "status": "success",
+        "strategy": "timing_restructure",
+        "error_type": null,
+        "error_log": null,
+        "is_mock": false,
+        "feedback_is_mock": true,
+        "is_duplicate": false,
+        "duplicate_of": null,
+        "candidate_hash": "98724141b61c64727d8c76cae112b215c499de97d321e8e83ac437609d4abda9",
+        "usage": {
+          "prompt_tokens": 627,
+          "completion_tokens": 87,
+          "total_tokens": 714,
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 627
+        },
+        "elapsed_seconds": 1.824,
+        "run_id": "474f63e7666b4a5c95f55fce8c8b25db",
+        "model": "deepseek-v4-pro",
+        "model_returned": "deepseek-v4-pro",
+        "created_at": "2026-10-17T10:00:30.181715+00:00",
+        "verification": "not_run",
+        "evaluation": "not_run",
+        "source_path": "addsubz_original.v",
+        "candidate_path": "addsubz_r2.v",
+        "prompt_path": "addsubz_r2_prompt.md",
+        "post_run_audit": {
+          "candidate_fingerprint": "eccd8376b071fa55c2133c0e17cbfd6dcc8bb1caa84feb9058d4fc70d0a91f6c",
+          "duplicate_of_original_ignoring_comments_and_formatting": false,
+          "functional_equivalence": "not_tested",
+          "performance_improvement": "not_measured"
+        }
+      }
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # 模块接口约定（第一周草案）
 
-本文件扩展 README 的建议接口，供 A/B/C/D 在第一周确认；当前尚无接口实现。
+本文件扩展 README 的建议接口，供 A/B/C/D 在第一周确认；D 已有单轮原型，见 [运行说明](optimization.md)，B/C/A 尚为草案。
 更改公共字段前，在 PR 中说明影响并通知相关负责人。
 
 ## 共同约定
@@ -31,6 +31,20 @@
 
 候选尚未经过等价验证。生成失败时 candidate_path 为 null；API 异常、空输出和输出格式问题应提供明确 error_type。
 反馈应包含可用的 verify/evaluate 结果、基线、已尝试策略和候选标识；具体历史长度由 A/D 确定。
+
+D 实现保留上述字段，额外返回 `is_mock`（真实调用 false，显式 mock 为 true）。
+`strategy` 为稳定策略 ID；反馈的 `tried_strategies` 使用这些 ID 的列表。
+`error_type`：`config_error`、`input_error`、`api_error`、`save_error` 对应 error；
+`api_timeout` 对应 timeout；`empty_output`、`extraction_failed`、`output_truncated` 对应 failed。
+success 仅表示候选已保存，不表示等价或性能改善。可选关键字参数不影响原有两个位置参数调用。
+
+2026-10-17 扩展：`context` 提供 design_id、top、parameters、constraints 等上下文；`history_path` 指向串行会话 JSONL。
+具体上下文字段尚待全组正式统一，D 当前按 JSON 传递，不实现工程展开或参数合法性验证。
+返回新增 `run_id`、`record_path`、`prompt_path`、`model`、`usage`、`elapsed_seconds`、
+`feedback_is_mock`、`candidate_hash`、`candidate_fingerprint`、`is_duplicate`、`duplicate_of`。
+is_mock 只表示生成后端；feedback_is_mock 单独表示反馈是否人工模拟，不能混用。
+is_duplicate 表示与当前输入或同上下文历史候选的 token 序列相同（忽略注释/排版），不是等价验证结论。
+不额外付费重试；由 A 根据状态决定跳过重复评估、换策略或停止。B/C 接口不变。
 
 ## B：等价验证
 
