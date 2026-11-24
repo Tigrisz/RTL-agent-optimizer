@@ -82,13 +82,17 @@ def build_equivalence_script(
 ) -> str:
     """Build a deterministic Yosys formal-equivalence script.
 
-    - Combinational designs use ``miter -equiv`` + ``sat -verify`` so
-      structurally different implementations (e.g. ripple vs behavioral
-      adders, shift-add vs behavioral multipliers) are proved directly and
-      non-equivalent candidates yield concrete SAT counterexamples.
+    - Combinational Stage 1 uses ``equiv_make`` + ``equiv_struct -icells`` +
+      ``equiv_simple -undef`` + ``equiv_status -assert`` so large circuits with
+      shared sub-cones (such as 16-bit combinational dividers) prove in
+      sub-second time.  If unproven cells remain, :func:`run_yosys_formal`
+      automatically runs Stage 2 (:func:`build_combinational_miter_script`)
+      using full ``miter -equiv`` + ``sat -verify`` to handle structurally
+      distinct rewrites and emit concrete SAT counterexamples.
     - Sequential designs run ``async2sync`` before ``equiv_make`` +
-      ``equiv_simple`` + ``equiv_induct`` + ``equiv_status -assert`` so
-      designs with asynchronous resets (``$adff``) are handled cleanly.
+      ``equiv_struct -icells`` + ``equiv_simple`` + ``equiv_induct`` +
+      ``equiv_status -assert`` so designs with asynchronous resets (``$adff``)
+      are handled cleanly.
     """
     extra = tuple(extra_sources)
     gold_sources = (Path(golden),) + extra
@@ -118,14 +122,15 @@ def build_equivalence_script(
         [
             "design -copy-from gold -as gold %s" % top,
             "design -copy-from gate -as gate %s" % top,
+            "equiv_make gold gate equiv",
+            "prep -top equiv",
+            "equiv_struct -icells",
         ]
     )
     if sequential:
         steps = max(1, int(induction_steps))
         lines.extend(
             [
-                "equiv_make gold gate equiv",
-                "prep -top equiv",
                 "equiv_simple -undef -seq %d" % steps,
                 "equiv_induct -undef -seq %d" % steps,
                 "equiv_status -assert",
@@ -134,12 +139,57 @@ def build_equivalence_script(
     else:
         lines.extend(
             [
-                "miter -equiv -flatten -make_outputs gold gate miter",
-                "hierarchy -top miter",
-                "opt_clean",
-                "sat -verify -prove trigger 0 -show-inputs -show-outputs -set-def-inputs miter",
+                "equiv_simple -undef",
+                "equiv_status -assert",
             ]
         )
+    return "\n".join(lines) + "\n"
+
+
+def build_combinational_miter_script(
+    golden: str,
+    candidate: str,
+    top: str,
+    *,
+    extra_sources: Iterable[Path] = (),
+    include_dirs: Iterable[Path] = (),
+    defines: Iterable[str] = (),
+) -> str:
+    """Build a full combinational miter-SAT script for proof or counterexample."""
+    extra = tuple(extra_sources)
+    gold_sources = (Path(golden),) + extra
+    gate_sources = (Path(candidate),) + extra
+    lines: List[str] = []
+    lines.extend(
+        _stash_design_lines(
+            gold_sources,
+            top,
+            "gold",
+            include_dirs=include_dirs,
+            defines=defines,
+            sequential=False,
+        )
+    )
+    lines.extend(
+        _stash_design_lines(
+            gate_sources,
+            top,
+            "gate",
+            include_dirs=include_dirs,
+            defines=defines,
+            sequential=False,
+        )
+    )
+    lines.extend(
+        [
+            "design -copy-from gold -as gold %s" % top,
+            "design -copy-from gate -as gate %s" % top,
+            "miter -equiv -flatten -make_outputs gold gate miter",
+            "hierarchy -top miter",
+            "opt_clean",
+            "sat -verify -prove trigger 0 -show-inputs -show-outputs -set-def-inputs miter",
+        ]
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -259,6 +309,8 @@ def classify_yosys_result(
     interface_markers = (
         "no matching port in gate module",
         "no matching port in gold module",
+        "can't match gate port",
+        "can't match gold port",
         "port width mismatch",
         "different port",
         "incompatible port",
@@ -412,6 +464,40 @@ def run_yosys_formal(
     classification = classify_yosys_result(
         process_result.returncode, process_result.output, process_result.timed_out
     )
+
+    # Stage 2 for combinational designs: when structural equivalence leaves
+    # unproven $equiv cells (e.g. structurally rewritten arithmetic or a real
+    # bug), run full miter-SAT within the remaining timeout to either prove
+    # equivalence or extract a concrete counterexample.
+    if not config.sequential and classification == ("error", None, "unproven"):
+        remaining = config.timeout_seconds - (time.monotonic() - started)
+        if remaining > 1.0:
+            miter_script = build_combinational_miter_script(
+                str(golden),
+                str(candidate),
+                config.top or "top",
+                extra_sources=config.extra_sources,
+                include_dirs=config.include_dirs,
+                defines=config.defines,
+            )
+            miter_result = _execute_yosys_script(
+                miter_script,
+                script_path=run_dir / "equivalence_miter.ys",
+                log_path=run_dir / "yosys_miter.log",
+                config=config,
+                timeout_seconds=remaining,
+                run_dir=run_dir,
+            )
+            miter_class = classify_yosys_result(
+                miter_result.returncode, miter_result.output, miter_result.timed_out
+            )
+            combined_output = (
+                process_result.output.rstrip()
+                + "\n\n=== Combinational Miter-SAT Stage 2 ===\n"
+                + miter_result.output
+            )
+            log_path.write_text(combined_output, encoding="utf-8")
+            return miter_class, miter_result, script
 
     # For sequential designs where induction leaves unproven $equiv cells,
     # run a bounded miter-SAT falsification pass within the remaining timeout

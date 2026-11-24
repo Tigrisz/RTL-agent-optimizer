@@ -31,8 +31,8 @@ python -m src.verification golden.v candidate.v --top TopModule --mode formal --
 ## 验证模式
 
 - `formal`：
-  - **组合电路**（`sequential=False`）：使用 Yosys 构建 `miter -equiv -flatten -make_outputs gold gate miter`，并运行 `sat -verify -prove trigger 0 -show-inputs -show-outputs -set-def-inputs miter`。既可直接证明不同实现结构（如行为级 vs 纹波进位加减器、行为级 vs 移位加法乘法器）的形式等价（`proof_level="formal"`），也能在不等价时输出具体 SAT 反例信号表。
-  - **时序电路**（`sequential=True`，需显式设置 `clock`）：在 `proc; flatten;` 后自动执行 `async2sync` 以兼容异步复位寄存器（`$adff`），再执行有限步 `equiv_simple/equiv_induct` 和 `equiv_status -assert`，成功结果标记为 `proof_level="bounded-formal"`。若归纳阶段存在未证明单元（`unproven`），在剩余超时预算内自动追加有界 `miter + sat -seq` 反例搜索（支持根据 `reset`/`reset_active_low` 施加复位约束），命中反例则精确分类为 `not_equivalent`，未命中反例则保持保守的 `error / unproven`，不误报为等价。
+  - **组合电路**（`sequential=False`）：采用两阶段形式验证。第一阶段执行 `equiv_make` + `equiv_struct -icells` + `equiv_simple -undef` + `equiv_status -assert`，可在亚秒级证明 `div_16bit` 等含共享子结构的大型组合电路；若仍有未证明 `$equiv` 单元（例如跨架构重写或存在真实 bug），自动在剩余超时预算内进入第二阶段 `miter -equiv -flatten -make_outputs gold gate miter` + `sat -verify -prove trigger 0 -show-inputs -show-outputs -set-def-inputs miter`，完成形式等价证明（`proof_level="formal"`）或输出具体 SAT 反例信号表。
+  - **时序电路**（`sequential=True`，需显式设置 `clock`）：在 `proc; flatten;` 后自动执行 `async2sync` 以兼容异步复位寄存器（`$adff`），再执行 `equiv_struct -icells` + 有限步 `equiv_simple/equiv_induct` 和 `equiv_status -assert`，成功结果标记为 `proof_level="bounded-formal"`。若归纳阶段存在未证明单元（`unproven`），在剩余超时预算内自动追加有界 `miter + sat -seq` 反例搜索（支持根据 `reset`/`reset_active_low` 施加复位约束），命中反例则精确分类为 `not_equivalent`，未命中反例则保持保守的 `error / unproven`，不误报为等价。
 - `simulation`：使用 Icarus Verilog/VVP 对同一个 testbench 分别运行 golden 和 candidate，替换 `__VCD__` / `` `VCD_PATH `` / `__SEED__`，按 IEEE 1364 位宽左扩展规则解析 VCD（保留共享 symbol 的别名信号，并折叠同时间戳的零延时 delta 周期毛刺与冗余无变化事件），逐信号比对 `observed_outputs`，不一致时报告首个分歧时间戳及 golden/candidate 信号值。必须显式提供 `testbench` 和 `observed_outputs`。
 - `both`：先通过 Yosys 形式验证，再通过 bounded simulation；两者都成功才返回成功（`formal+bounded-simulation` 或 `bounded-formal+bounded-simulation`）。
 
@@ -57,5 +57,5 @@ python -m src.verification golden.v candidate.v --top TopModule --mode formal --
 ## 与其他任务联调及真实工具验证状态
 
 - 任务 A 只需把 golden/candidate RTL 路径和配置传给 `verify`（或通过 CLI 调用）并读取返回字典；即使输入校验提前失败也会写入 `run_metadata.json`、`verify.log` 和 `verify_result.json`。
-- 已在 **WSL2（Yosys 0.52 + Icarus Verilog 12.0 + VVP）** 完成端到端验证，覆盖课程 Demo（`opti_demo`）中的组合电路（`addsubz`、`opt_top`、`popcount3`、`mux2to1v`、`mult8`）与时序电路（`mac8`、`gcd` 以及带异步复位的累加器），以及不等价反例、端口不匹配、语法错误和超时场景。
-- 待课程 8 个公开 benchmark RTL 正式导入 `benchmarks/public/` 后，补充全部公开用例（特别是 4 个时序电路）的统一回归测试清单。
+- 已在 **WSL2（Yosys 0.52 + Icarus Verilog 12.0 + VVP）** 完成对课程助教更新的**全部 8 个公开测试用例**（`case1`–`case8` 及其预置激励 `case1_tb.v`–`case8_tb.v`）的 `formal` + `simulation`（`both` 模式）端到端验证，全部通过且总耗时约 1.5 秒；同时覆盖结构重写、不等价反例、端口不匹配、语法错误和超时场景。
+- 建议团队尽快将这 8 个公开用例及统一配置同步导入本仓库的 `benchmarks/public/` 与 `configs/`，以便 A/B/C/D 全链路联调复用。

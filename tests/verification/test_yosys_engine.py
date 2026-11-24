@@ -1,6 +1,7 @@
 import unittest
 
 from src.verification.yosys_engine import (
+    build_combinational_miter_script,
     build_equivalence_script,
     build_sequential_bmc_script,
     classify_yosys_result,
@@ -9,7 +10,7 @@ from src.verification.yosys_engine import (
 
 
 class YosysEngineTests(unittest.TestCase):
-    def test_combinational_script_uses_double_quotes_and_miter_sat(self):
+    def test_combinational_scripts_use_double_quotes_structural_and_miter_sat(self):
         script = build_equivalence_script(
             golden="C:\\fixtures\\golden.v",
             candidate="C:\\fixtures\\candidate.v",
@@ -19,8 +20,18 @@ class YosysEngineTests(unittest.TestCase):
         self.assertIn('"C:/fixtures/golden.v"', script)
         self.assertIn('"C:/fixtures/candidate.v"', script)
         self.assertNotIn("'C:/fixtures/golden.v'", script)
-        self.assertIn("miter -equiv -flatten -make_outputs gold gate miter", script)
-        self.assertIn("sat -verify -prove trigger 0", script)
+        self.assertIn("equiv_make gold gate equiv", script)
+        self.assertIn("equiv_struct -icells", script)
+        self.assertIn("equiv_simple -undef", script)
+        self.assertIn("equiv_status -assert", script)
+
+        miter_script = build_combinational_miter_script(
+            golden="C:\\fixtures\\golden.v",
+            candidate="C:\\fixtures\\candidate.v",
+            top="TopModule",
+        )
+        self.assertIn("miter -equiv -flatten -make_outputs gold gate miter", miter_script)
+        self.assertIn("sat -verify -prove trigger 0", miter_script)
 
     def test_sequential_script_runs_async2sync_and_induction(self):
         script = build_equivalence_script(
