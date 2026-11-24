@@ -8,7 +8,7 @@ import time
 import uuid
 from typing import Any, Dict, Optional, Union
 
-from .config import VerificationConfig
+from .config import VerificationConfig, probe_tool_version, resolve_command
 from .regression import run_regression
 from .result import VerificationResult
 from .yosys_engine import run_yosys_formal, summarize_yosys_error
@@ -41,6 +41,19 @@ def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
 
 
+def _collect_tool_versions(config: VerificationConfig) -> Dict[str, Optional[str]]:
+    if config.is_mock:
+        return {}
+    versions: Dict[str, Optional[str]] = {}
+    if config.mode in ("formal", "both"):
+        yosys_cmd = resolve_command(config.yosys_bin, "YOSYS_BIN", "yosys")
+        versions["yosys"] = probe_tool_version(yosys_cmd)
+    if config.mode in ("simulation", "both"):
+        iverilog_cmd = resolve_command(config.iverilog_bin, "IVERILOG_BIN", "iverilog")
+        versions["iverilog"] = probe_tool_version(iverilog_cmd)
+    return versions
+
+
 def _write_metadata(run_dir: Path, golden: Path, candidate: Path, config: VerificationConfig) -> None:
     _write_json(
         run_dir / "run_metadata.json",
@@ -60,6 +73,7 @@ def _write_metadata(run_dir: Path, golden: Path, candidate: Path, config: Verifi
             "induction_steps": config.induction_steps,
             "seed": config.seed,
             "is_mock": config.is_mock,
+            "tool_versions": _collect_tool_versions(config),
             "testbench": str(config.testbench) if config.testbench else None,
             "observed_outputs": list(config.observed_outputs),
         },
@@ -182,6 +196,19 @@ def verify(
     if config.mode == "formal":
         return _finish(run_dir, formal_result, started)
     if formal_result.status != "success":
+        # When formal proof is merely inconclusive (unproven) in `both` mode,
+        # still run bounded simulation so multi-cycle bugs beyond induction_steps
+        # are surfaced as concrete `not_equivalent` feedback rather than `unproven`.
+        if formal_result.status == "error" and formal_result.error_type == "unproven":
+            regression_result = run_regression(golden, candidate, config, run_dir)
+            regression_result.write_json(run_dir / "regression_result.json")
+            if regression_result.status == "failed":
+                return _finish(run_dir, regression_result, started)
+            if regression_result.status == "success":
+                formal_result.error_log = (
+                    (formal_result.error_log or "formal proof unproven")
+                    + " (bounded simulation passed, but formal proof remains unproven)"
+                )
         return _finish(run_dir, formal_result, started)
 
     regression_result = run_regression(golden, candidate, config, run_dir)

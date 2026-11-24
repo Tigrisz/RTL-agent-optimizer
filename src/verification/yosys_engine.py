@@ -28,7 +28,7 @@ _ASSERT_UNPROVEN_RE = re.compile(
     re.IGNORECASE,
 )
 _MISSING_TOP_RE = re.compile(r"module\s+[`'\"]?[^`'\"]+[`'\"]?\s+not found", re.IGNORECASE)
-_COUNTEREXAMPLE_ROW_RE = re.compile(r"^\s*(?:\d+\s+)?\\(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s*$")
+_COUNTEREXAMPLE_ROW_RE = re.compile(r"^\s*(?:(\d+)\s+)?\\(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s*$")
 
 
 def _quote_yosys(value: str) -> str:
@@ -347,18 +347,54 @@ def summarize_yosys_error(output: str, error_type: Optional[str], max_chars: int
         return "verification failed without a diagnostic"
 
     if error_type == "not_equivalent":
-        cex_entries: List[str] = []
+        seq_steps: List[Tuple[Optional[str], str, str, str]] = []
         for line in lines:
             match = _COUNTEREXAMPLE_ROW_RE.match(line)
             if match:
-                sig_name, dec_val, hex_val, _bin_val = match.groups()
-                if sig_name == "trigger":
-                    continue
-                cex_entries.append("%s=%s(0x%s)" % (sig_name, dec_val, hex_val))
-        if cex_entries:
-            # Keep inputs and gold/gate outputs compact (limit sequential rows to first/last failing step).
-            summary = "counterexample found: " + ", ".join(cex_entries[-16:])
-            return summary[:max_chars]
+                step, sig_name, dec_val, hex_val, _bin_val = match.groups()
+                seq_steps.append((step, sig_name, dec_val, hex_val))
+        if seq_steps:
+            # For sequential SAT tables, pick the earliest step where trigger=1
+            # (or where a gold_* / gate_* output diverges) instead of the final step.
+            has_steps = any(step is not None for step, *_ in seq_steps)
+            if has_steps:
+                grouped: dict = {}
+                step_order: List[str] = []
+                for step, sig_name, dec_val, hex_val in seq_steps:
+                    key = step if step is not None else "0"
+                    if key not in grouped:
+                        grouped[key] = []
+                        step_order.append(key)
+                    grouped[key].append((sig_name, dec_val, hex_val))
+
+                target_step = step_order[-1]
+                for key in step_order:
+                    rows = grouped[key]
+                    trig = [dec for name, dec, _ in rows if name == "trigger"]
+                    if any(v not in ("0", "--") for v in trig):
+                        target_step = key
+                        break
+                    gold_vals = {name[5:]: dec for name, dec, _ in rows if name.startswith("gold_")}
+                    gate_vals = {name[5:]: dec for name, dec, _ in rows if name.startswith("gate_")}
+                    if any(gold_vals.get(k) != gate_vals.get(k) for k in gold_vals if k in gate_vals):
+                        target_step = key
+                        break
+                chosen = [
+                    "%s=%s(0x%s)" % (name, dec, hx)
+                    for name, dec, hx in grouped[target_step]
+                    if name != "trigger"
+                ]
+                summary = "counterexample found (step %s): %s" % (target_step, ", ".join(chosen[:16]))
+                return summary[:max_chars]
+
+            cex_entries = [
+                "%s=%s(0x%s)" % (sig_name, dec_val, hex_val)
+                for _step, sig_name, dec_val, hex_val in seq_steps
+                if sig_name != "trigger"
+            ]
+            if cex_entries:
+                summary = "counterexample found: " + ", ".join(cex_entries[:16])
+                return summary[:max_chars]
 
     if error_type == "unproven":
         picked = [

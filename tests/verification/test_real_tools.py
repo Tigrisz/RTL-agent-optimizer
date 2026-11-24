@@ -172,7 +172,9 @@ class RealYosysFormalTests(unittest.TestCase):
             self.assertEqual(res_bug["status"], "failed")
             self.assertFalse(res_bug["equivalent"])
             self.assertEqual(res_bug["error_type"], "not_equivalent")
-            self.assertIn("counterexample found:", res_bug["error_log"])
+            self.assertIn("counterexample found (step ", res_bug["error_log"])
+            self.assertIn("gold_q=", res_bug["error_log"])
+            self.assertIn("gate_q=", res_bug["error_log"])
 
 
 @unittest.skipUnless(HAS_YOSYS and HAS_SIM, "real yosys, iverilog, and vvp are required")
@@ -216,6 +218,38 @@ class RealOptiDemoCasesTests(unittest.TestCase):
                 self.assertEqual(result["status"], "success", "%s failed: %s" % (cid, result))
                 self.assertTrue(result["equivalent"], cid)
                 self.assertEqual(result["proof_level"], expected_proof, cid)
+                metadata = json.loads((tmp / cid / "run_metadata.json").read_text(encoding="utf-8"))
+                self.assertIn("Yosys", metadata["tool_versions"]["yosys"] or "")
+
+    @unittest.skipUnless((OPTI_DEMO_ROOT / "case" / "case8" / "rtl.v").is_file(), "official case8 is not present")
+    def test_case8_multicycle_bug_is_caught_in_both_mode_even_with_short_induction(self):
+        with workspace_tempdir() as tmp:
+            gold = OPTI_DEMO_ROOT / "case" / "case8" / "rtl.v"
+            tb = OPTI_DEMO_ROOT / "case" / "tb" / "case8_tb.v"
+            buggy = tmp / "case8_bug.v"
+            buggy.write_text(
+                gold.read_text(encoding="utf-8").replace("SR[0] <= CO;", "SR[0] <= ~CO;"),
+                encoding="utf-8",
+            )
+            result = verify(
+                gold,
+                buggy,
+                VerificationConfig(
+                    top="verified_radix2_div",
+                    mode="both",
+                    sequential=True,
+                    clock="clk",
+                    reset="rst",
+                    induction_steps=4,
+                    testbench=tb,
+                    observed_outputs=("res_valid", "result"),
+                    run_dir=tmp / "c8_bug",
+                ),
+            )
+            self.assertEqual(result["status"], "failed", result)
+            self.assertFalse(result["equivalent"])
+            self.assertEqual(result["error_type"], "not_equivalent")
+            self.assertIn("waveform mismatch on", result["error_log"])
 
     @unittest.skipUnless((OPTI_DEMO_ROOT / "case" / "case1" / "rtl.v").is_file(), "official 8 TA cases are not present")
     def test_case1_optimized_rewrite_bug_detection_and_cli(self):

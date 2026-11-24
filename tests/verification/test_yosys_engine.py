@@ -125,6 +125,25 @@ class YosysEngineTests(unittest.TestCase):
         self.assertIn("gate_out=4(0x4)", summary)
         self.assertNotIn("trigger=", summary)
 
+    def test_summarize_yosys_error_picks_first_failing_step_for_sequential_cex(self):
+        log = (
+            "SAT proof finished - model found: FAIL!\n"
+            "  1 \\gold_y 0 0 0\n"
+            "  1 \\gate_y 0 0 0\n"
+            "  1 \\trigger 0 0 0\n"
+            "  2 \\gold_y 5 5 101\n"
+            "  2 \\gate_y 3 3 011\n"
+            "  2 \\trigger 1 1 1\n"
+            "  3 \\gold_y 9 9 1001\n"
+            "  3 \\gate_y 9 9 1001\n"
+            "  3 \\trigger 0 0 0\n"
+            "ERROR: Called with -verify and proof did fail!\n"
+        )
+        summary = summarize_yosys_error(log, "not_equivalent")
+        self.assertIn("counterexample found (step 2):", summary)
+        self.assertIn("gold_y=5(0x5)", summary)
+        self.assertIn("gate_y=3(0x3)", summary)
+
 
 if __name__ == "__main__":
     unittest.main()

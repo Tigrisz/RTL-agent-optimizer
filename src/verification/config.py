@@ -3,10 +3,12 @@
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
+import subprocess
 from typing import Dict, Iterable, Optional, Sequence, Tuple, Union
 
 
 Command = Union[str, Sequence[str]]
+_VERSION_CACHE: Dict[Tuple[str, ...], Optional[str]] = {}
 
 
 def _as_path_tuple(values: Iterable[Union[str, Path]]) -> Tuple[Path, ...]:
@@ -92,3 +94,28 @@ def resolve_command(config_value: Optional[Command], key: str, default: str) -> 
         return env_value
     tools_value = find_tools_env().get(key)
     return tools_value or default
+
+
+def probe_tool_version(command: Command) -> Optional[str]:
+    """Return the first version line reported by ``<tool> -V`` (cached)."""
+    parts = (command,) if isinstance(command, str) else tuple(str(p) for p in command)
+    if parts in _VERSION_CACHE:
+        return _VERSION_CACHE[parts]
+    version: Optional[str] = None
+    try:
+        completed = subprocess.run(
+            list(parts) + ["-V"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        for line in (completed.stdout + "\n" + completed.stderr).splitlines():
+            stripped = line.strip()
+            if stripped:
+                version = stripped
+                break
+    except (OSError, subprocess.SubprocessError):
+        version = None
+    _VERSION_CACHE[parts] = version
+    return version
