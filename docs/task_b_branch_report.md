@@ -1,39 +1,38 @@
 # Task B 分支说明
 
-分支建议名称：`task-b-verification`
+分支名称：`task-b-verification`
 
-本分支包含任务 B（验证模块）的独立实现，以及与 A/C/D 联调前的输入责任和交付约定。
+本分支包含任务 B（验证模块）的完整实现、真实 WSL2 工具链（Yosys 0.52 + Icarus Verilog 12.0）端到端测试，以及与 A/C/D 联调对齐约定。
 
-## 已实现功能
+## 已实现与已修复功能
 
-- 提供 `src.verification.verify()`（统一验证函数）和 `VerificationConfig`（验证配置对象）。
-- 使用 Yosys 执行组合 RTL 的形式等价验证。
-- 支持顺序 RTL 的有限步检查，并将成功结果标记为 `bounded-formal`。
-- 使用 Icarus/VVP 执行可选的仿真回归，比较显式指定的 `observed_outputs`（观测输出）。
-- 支持 `formal`、`simulation` 和 `both` 三种模式。
-- 区分 `success`、`failed`、`error`、`timeout`，工具错误和超时返回 `equivalent: null`。
-- 支持多文件 RTL、include 目录、宏定义、工具路径和超时时间。
-- 保存 `run_metadata.json`、Yosys 脚本、编译/运行日志、VCD 波形和 `verify_result.json`。
-- 不修改 golden RTL（基准 RTL），每次运行使用独立目录。
-- 新增任务 B 联调对齐说明：`docs/task_b_alignment.md`。
+- 提供 `src.verification.verify()`（Python 函数入口）、`python -m src.verification`（CLI 入口）和 `VerificationConfig`（验证配置对象）。
+- **组合形式验证**：使用 Yosys `miter -equiv` + `sat -verify`（双引号路径 + `-l` 落盘日志 + `-s` 脚本执行），支持不同架构间的等价证明并输出精确 SAT 反例信号表。
+- **时序形式验证**：在 `proc; flatten;` 后加入 `async2sync` 兼容异步复位寄存器（`$adff`），运行有限步 `equiv_simple/equiv_induct` + `equiv_status -assert`（标记 `bounded-formal`）；遇到未证明 `$equiv` 时在剩余超时内追加有界 `miter + sat -seq` 反例搜索（支持 `reset` / `reset_active_low`）。
+- **日志分类 Bug 修复**：修复旧版对 Yosys 0.52 日志中 `"Found 0 unproven $equiv cells"` / `"0 are unproven"` 误判为 `error / unproven` 的问题，并细分 `not_equivalent`、`syntax_error`、`interface_mismatch`、`missing_top`、`unproven`、`unsupported`、`tool_error`、`timeout`。
+- **仿真回归增强**：支持替换 `__VCD__`、`` `VCD_PATH ``、以及 `opti_demo` 激励中的 `__SEED__`；修复 VCD 别名信号覆盖、按 IEEE 1364 规范扩展位宽、折叠同时间戳零延时 delta 周期毛刺，并在波形不一致时精确报告首个分歧时刻与信号值。
+- **面向 D 的精简反馈与公共字段对齐**：提炼简洁 `error_log` 控制 Token 消耗；补充 `is_mock`、`elapsed_seconds`，且输入校验提前失败也统一落盘 `run_metadata.json`。
+- 不修改 golden RTL，每次运行使用独立目录保存脚本、完整日志、元数据和 JSON 结果；测试临时目录改为系统临时目录，不再在仓库根目录遗留 `.test-tmp/`。
 
-## 本地运行命令
+## 本地运行命令（WSL2 / Linux）
 
 在仓库根目录执行：
 
 ```bash
-python -m unittest discover -s tests/verification -p "test_*.py" -v
-python -m compileall -q src/verification tests/verification
+python3 -m compileall -q src/verification tests/verification
+python3 -m unittest discover -s tests/verification -p "test_*.py" -v
 ```
 
-当前测试结果：
+当前测试覆盖 26 项用例（含单元测试与真实 Yosys 0.52 / Icarus Verilog 12.0 端到端测试），覆盖：
 
-```text
-Ran 16 tests
-OK
-```
+- 组合等价（不同结构如 `addsubz_v1` vs `addsubz_v2`、`opt_top` 资源复用版、`mult8` 移位加法等）；
+- 组合不等价与 SAT 反例提取；
+- 端口不匹配（`interface_mismatch`）、语法错误（`syntax_error`）、缺失顶层（`missing_top`）、超时（`timeout`）；
+- 时序异步复位等价（`bounded-formal`）与时序 bug 反例检测；
+- `simulation` 与 `both` 模式（含 `opti_demo` 激励 `stim_addsubz.v`、`stim_opt_top.v`、`stim_mac8.v` 及波形分歧时间戳报告）；
+- CLI 入口调用。
 
-真实验证调用示例：
+## 调用样例
 
 ```python
 from src.verification import VerificationConfig, verify
@@ -51,67 +50,16 @@ result = verify(
 print(result)
 ```
 
-## 输入和输出样例
+或命令行直接运行：
 
-### 等价验证成功
-
-输入：
-
-```text
-golden_rtl    = benchmarks/public/case3/golden.v
-candidate_rtl = runs/case3/iter_001/candidate.v
-mode          = formal
-top           = top
+```bash
+python3 -m src.verification golden.v candidate.v --top TopModule --mode both \
+  --testbench stim_addsubz.v --observe out --observe result_is_zero \
+  --run-dir runs/verify_demo
 ```
 
-输出：
+## 尚未完成（待团队配合）
 
-```json
-{
-  "status": "success",
-  "equivalent": true,
-  "error_type": null,
-  "error_log": null,
-  "log_path": "runs/case3/iter_001/verify/yosys.log",
-  "verification_method": "yosys-formal",
-  "proof_level": "formal"
-}
-```
-
-### 确认不等价
-
-```json
-{
-  "status": "failed",
-  "equivalent": false,
-  "error_type": "not_equivalent",
-  "error_log": "counterexample found; outputs mismatch",
-  "log_path": "runs/case3/iter_001/verify/yosys.log"
-}
-```
-
-### 工具错误或超时
-
-```json
-{
-  "status": "timeout",
-  "equivalent": null,
-  "error_type": "timeout",
-  "error_log": "simulation timeout",
-  "log_path": "runs/case3/iter_001/verify/candidate_run.log"
-}
-```
-
-`error_log`（错误摘要）用于主控快速反馈；`log_path`（完整日志路径）指向保留全部命令、标准输出和标准错误的日志文件。
-
-## 尚未完成的部分
-
-1. 尚未在真实课程 benchmark 上完成组合和时序端到端验证。
-2. 尚未完成 A 主控、C 评估、D 候选生成与 B 的真实全链路联调。
-3. 顺序验证的 clock/reset（时钟/复位）目前记录在元数据中，尚未根据最终用例生成完整的形式约束。
-4. `docs/interfaces.md` 中要求的 `is_mock: true` 字段尚未加入正式返回结果，需要与 A 确认模拟工具结果的协议。
-5. 真实 benchmark 的顶层模块、额外源文件、testbench 和 `observed_outputs` 尚未统一登记。
-
-## 当前阻塞
-
-- 当前没有把假工具测试结果当作真实 Yosys/Icarus 证明；真实工具链可用后还需要重新执行 smoke test（冒烟测试）和 benchmark 回归。
+1. 课程 8 个公开 benchmark RTL 源码及配套约束尚未导入 `benchmarks/public/`，导入后需补充全部 8 个用例（特别是 4 个时序用例）的回归配置与基线验证记录。
+2. 尚未与 A 主控、C 评估完成真实全链路合入联调（本分支已具备提交 PR 合入 `main` 的条件）。
+3. 复杂组合电路（如 `div_16bit`）与长周期时序电路（如 `verified_radix2_div`、`LIFObuffer`）的验证超时预算与 `formal/simulation` 组合策略需拿到真实源码后实测调优。

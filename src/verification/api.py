@@ -4,13 +4,14 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
+import time
 import uuid
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Union
 
 from .config import VerificationConfig
 from .regression import run_regression
 from .result import VerificationResult
-from .yosys_engine import run_yosys_formal
+from .yosys_engine import run_yosys_formal, summarize_yosys_error
 
 
 _TOP_RE = re.compile(r"(?m)^\s*module\s+([A-Za-z_][A-Za-z0-9_$]*)\b")
@@ -36,78 +37,11 @@ def _detect_top(path: Path) -> Optional[str]:
     return match.group(1) if match else None
 
 
-def _short_error(text: str) -> str:
-    compact = " ".join((text or "").split())
-    return compact[-1000:] if compact else "verification failed without a diagnostic"
-
-
 def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
 
 
-def _finish(run_dir: Path, result: VerificationResult) -> Dict[str, Any]:
-    result.write_json(run_dir / "verify_result.json")
-    return result.to_dict()
-
-
-def _input_error(run_dir: Path, error_type: str, detail: str) -> Dict[str, Any]:
-    log_path = run_dir / "verify.log"
-    log_path.write_text(detail + "\n", encoding="utf-8")
-    return _finish(
-        run_dir,
-        VerificationResult.error(
-            error_type=error_type,
-            error_log=detail,
-            log_path=str(log_path),
-        ),
-    )
-
-
-def verify(
-    golden_rtl: Path,
-    candidate_rtl: Path,
-    config: Optional[VerificationConfig] = None,
-) -> Dict[str, Any]:
-    """Verify one candidate against the immutable original RTL.
-
-    The function is intentionally synchronous so A can use it as one atomic
-    step in its iteration state machine.  It returns only JSON-compatible
-    values and writes the complete run artifacts before returning.
-    """
-    config = config or VerificationConfig()
-    run_dir = _run_dir(config)
-    golden = Path(golden_rtl).expanduser().resolve()
-    candidate = Path(candidate_rtl).expanduser().resolve()
-
-    if config.mode not in _MODES:
-        return _input_error(run_dir, "invalid_input", "unsupported verification mode: %s" % config.mode)
-    if config.timeout_seconds <= 0:
-        return _input_error(run_dir, "invalid_input", "timeout_seconds must be positive")
-    if not golden.is_file():
-        return _input_error(run_dir, "missing_file", "golden RTL does not exist: %s" % golden)
-    if not candidate.is_file():
-        return _input_error(run_dir, "missing_file", "candidate RTL does not exist: %s" % candidate)
-    missing_sources = [path for path in config.extra_sources if not path.expanduser().is_file()]
-    if missing_sources:
-        return _input_error(run_dir, "missing_file", "missing extra source: %s" % missing_sources[0])
-    if config.mode in ("simulation", "both") and config.testbench is None:
-        return _input_error(run_dir, "missing_testbench", "simulation mode requires a testbench")
-    if config.mode in ("simulation", "both") and config.testbench is not None and not config.testbench.is_file():
-        return _input_error(run_dir, "missing_testbench", "testbench does not exist: %s" % config.testbench)
-    if config.mode in ("simulation", "both") and not config.observed_outputs:
-        return _input_error(
-            run_dir,
-            "invalid_input",
-            "simulation mode requires explicit observed_outputs",
-        )
-
-    if not config.top:
-        config.top = _detect_top(golden)
-    if not config.top:
-        return _input_error(run_dir, "invalid_input", "unable to detect top module from golden RTL")
-    if config.sequential and not config.clock:
-        return _input_error(run_dir, "invalid_input", "sequential verification requires an explicit clock")
-
+def _write_metadata(run_dir: Path, golden: Path, candidate: Path, config: VerificationConfig) -> None:
     _write_json(
         run_dir / "run_metadata.json",
         {
@@ -124,13 +58,98 @@ def verify(
             "reset": config.reset,
             "reset_active_low": config.reset_active_low,
             "induction_steps": config.induction_steps,
+            "seed": config.seed,
+            "is_mock": config.is_mock,
             "testbench": str(config.testbench) if config.testbench else None,
             "observed_outputs": list(config.observed_outputs),
         },
     )
 
+
+def _finish(run_dir: Path, result: VerificationResult, started: float) -> Dict[str, Any]:
+    result.elapsed_seconds = round(time.monotonic() - started, 4)
+    result.write_json(run_dir / "verify_result.json")
+    return result.to_dict()
+
+
+def _input_error(
+    run_dir: Path,
+    golden: Path,
+    candidate: Path,
+    config: VerificationConfig,
+    error_type: str,
+    detail: str,
+    started: float,
+) -> Dict[str, Any]:
+    _write_metadata(run_dir, golden, candidate, config)
+    log_path = run_dir / "verify.log"
+    log_path.write_text(detail + "\n", encoding="utf-8")
+    return _finish(
+        run_dir,
+        VerificationResult.error(
+            error_type=error_type,
+            error_log=detail,
+            log_path=str(log_path),
+            is_mock=config.is_mock,
+        ),
+        started,
+    )
+
+
+def verify(
+    golden_rtl: Union[str, Path],
+    candidate_rtl: Union[str, Path],
+    config: Optional[VerificationConfig] = None,
+) -> Dict[str, Any]:
+    """Verify one candidate against the immutable original RTL.
+
+    The function is intentionally synchronous so A can use it as one atomic
+    step in its iteration state machine.  It returns only JSON-compatible
+    values and writes the complete run artifacts before returning.
+    """
+    started = time.monotonic()
+    config = config or VerificationConfig()
+    run_dir = _run_dir(config)
+    golden = Path(golden_rtl).expanduser().resolve()
+    candidate = Path(candidate_rtl).expanduser().resolve()
+
+    if config.mode not in _MODES:
+        return _input_error(run_dir, golden, candidate, config, "invalid_input", "unsupported verification mode: %s" % config.mode, started)
+    if config.timeout_seconds <= 0:
+        return _input_error(run_dir, golden, candidate, config, "invalid_input", "timeout_seconds must be positive", started)
+    if not golden.is_file():
+        return _input_error(run_dir, golden, candidate, config, "missing_file", "golden RTL does not exist: %s" % golden, started)
+    if not candidate.is_file():
+        return _input_error(run_dir, golden, candidate, config, "missing_file", "candidate RTL does not exist: %s" % candidate, started)
+    missing_sources = [path for path in config.extra_sources if not path.expanduser().is_file()]
+    if missing_sources:
+        return _input_error(run_dir, golden, candidate, config, "missing_file", "missing extra source: %s" % missing_sources[0], started)
+    if config.mode in ("simulation", "both") and config.testbench is None:
+        return _input_error(run_dir, golden, candidate, config, "missing_testbench", "simulation mode requires a testbench", started)
+    if config.mode in ("simulation", "both") and config.testbench is not None and not config.testbench.is_file():
+        return _input_error(run_dir, golden, candidate, config, "missing_testbench", "testbench does not exist: %s" % config.testbench, started)
+    if config.mode in ("simulation", "both") and not config.observed_outputs:
+        return _input_error(
+            run_dir,
+            golden,
+            candidate,
+            config,
+            "invalid_input",
+            "simulation mode requires explicit observed_outputs",
+            started,
+        )
+
+    if not config.top:
+        config.top = _detect_top(golden)
+    if not config.top:
+        return _input_error(run_dir, golden, candidate, config, "invalid_input", "unable to detect top module from golden RTL", started)
+    if config.sequential and not config.clock:
+        return _input_error(run_dir, golden, candidate, config, "invalid_input", "sequential verification requires an explicit clock", started)
+
+    _write_metadata(run_dir, golden, candidate, config)
+
     if config.mode == "simulation":
-        return _finish(run_dir, run_regression(golden, candidate, config, run_dir))
+        return _finish(run_dir, run_regression(golden, candidate, config, run_dir), started)
 
     try:
         classification, process_result, _script = run_yosys_formal(golden, candidate, config, run_dir)
@@ -142,29 +161,37 @@ def verify(
                 error_log=str(exc),
                 log_path=str(run_dir / "yosys.log"),
                 verification_method="yosys-formal",
-                proof_level="formal",
+                proof_level=None,
+                is_mock=config.is_mock,
             ),
+            started,
         )
 
     status, equivalent, error_type = classification
+    formal_proof_level = ("bounded-formal" if config.sequential else "formal") if status == "success" else None
     formal_result = VerificationResult(
         status=status,
         equivalent=equivalent,
         error_type=error_type,
-        error_log=_short_error(process_result.output) if status != "success" else None,
+        error_log=summarize_yosys_error(process_result.output, error_type) if status != "success" else None,
         log_path=str(run_dir / "yosys.log"),
         verification_method="yosys-formal",
-        proof_level=("bounded-formal" if config.sequential else "formal") if status == "success" else None,
+        proof_level=formal_proof_level,
+        is_mock=config.is_mock,
     )
     if config.mode == "formal":
-        return _finish(run_dir, formal_result)
+        return _finish(run_dir, formal_result, started)
     if formal_result.status != "success":
-        return _finish(run_dir, formal_result)
+        return _finish(run_dir, formal_result, started)
 
     regression_result = run_regression(golden, candidate, config, run_dir)
     regression_result.write_json(run_dir / "regression_result.json")
     if regression_result.status != "success":
-        return _finish(run_dir, regression_result)
+        return _finish(run_dir, regression_result, started)
+
+    combined_proof = (
+        "bounded-formal+bounded-simulation" if config.sequential else "formal+bounded-simulation"
+    )
     combined = VerificationResult(
         status="success",
         equivalent=True,
@@ -172,6 +199,7 @@ def verify(
         error_log=None,
         log_path=str(run_dir / "yosys.log"),
         verification_method="yosys-formal+iverilog-regression",
-        proof_level="formal+bounded-simulation",
+        proof_level=combined_proof,
+        is_mock=config.is_mock,
     )
-    return _finish(run_dir, combined)
+    return _finish(run_dir, combined, started)

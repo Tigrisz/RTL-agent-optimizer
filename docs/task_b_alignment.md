@@ -171,11 +171,10 @@ result = verify(
 
 ## 5. 当前阻塞与未完成事项
 
-1. 当前 Windows PATH/WSL 环境还没有完成真实 Yosys、Icarus/VVP 的端到端运行；现有 16 项测试使用可控假工具验证接口和分类逻辑。
-2. 仓库中尚未导入最终公开 benchmark、真实 testbench、顶层模块和观测信号清单；这些信息需要 benchmark 负责人或 A 提供。
-3. 顺序逻辑的 `clock`、`reset` 信息目前会进入运行元数据；真实时序约束和复位假设仍需结合课程用例确认。
-4. A/C/D 尚未完成一次真实全链路联调；当前 B 可以独立调用，但还没有接入最终主控和评估流程。
-5. 在真实工具和 benchmark 确认后，需要补充至少一组组合样例、一组时序样例、一个不等价样例、一个工具错误样例和一个超时样例。
+1. 已在 WSL2（Yosys 0.52 + Icarus Verilog 12.0 + VVP）完成组合、时序、不等价反例、语法错、端口不匹配和超时场景的端到端真实工具验证（覆盖 `opti_demo` 案例及 D 在 PR #2 交接的 `addsubz_r2.v`）。
+2. 仓库中尚未导入课程最终的 8 个公开 benchmark、真实 testbench、顶层模块和观测信号清单；这些信息需要 benchmark 负责人或 A 提供。
+3. 顺序逻辑的 `clock`、`reset`、`reset_active_low` 目前已写入运行元数据，并在有界反例搜索（BMC）阶段生成复位假设；针对最终 4 个课程时序用例（如流水线、多周期除法器、LIFO）的展开步数和仿真策略需拿到源码后实测确认。
+4. A/C/D 尚未完成一次真实全链路联调；当前 B 已支持 Python API 和 CLI 独立调用，待合并 PR 后接入最终主控和评估流程。
 
 ## 6. 联调验收条件
 
@@ -191,11 +190,11 @@ result = verify(
 
 ## 7. 当前实现的联调注意事项
 
-- 当前入口是 Python 函数 `verify()`（验证函数），没有独立命令行入口；A 需要在 Python 主控中调用它。
+- 同时提供 Python 函数入口 `verify()` 和命令行入口 `python -m src.verification`；A 在主控中建议直接调用 Python 函数。
 - `top`（顶层模块名）最好由 A 显式提供。自动识别只适用于简单单模块文件，多模块设计不能依赖“第一个 module”猜测。
 - `simulation`（仿真回归）不会自动重命名顶层模块；golden、candidate 和 testbench 的顶层接口需要保持兼容。如果候选改变模块名或接口，D/A 必须提供 wrapper（包装模块）或明确映射。
-- `clock`、`reset` 和 `reset_active_low` 目前会记录在 `run_metadata.json`，但不会自动生成完整的时钟/复位形式约束；时序语义仍需由实际 RTL 和 testbench 表达。
+- `clock`、`reset` 和 `reset_active_low` 会记录在 `run_metadata.json`，并在顺序逻辑的 BMC 反例搜索阶段用于施加复位假设；多周期时序的完整功能回归建议配合 `mode="both"` 与明确 testbench 使用。
 - `log_path`（完整日志路径）会根据后端指向具体日志，例如 `yosys.log` 或 `candidate_run.log`；A 应读取该字段，不要假设固定叫 `verify.log`。所有其他日志仍保留在同一 `run_dir`。
-- 公共接口草案要求 mock（模拟工具）结果带 `is_mock: true`。当前实现的单元测试使用假工具，但正式 `verify()` 结果尚未增加 `is_mock` 字段；如果 A 要在主控中运行模拟后端，需要先统一这一字段的协议。
-- 输入检查过早失败时，可能只生成 `verify.log` 和 `verify_result.json`，还没有 `run_metadata.json`。A 如果要求每轮都有完整元数据，应在主控侧先生成迭代记录，或后续统一 B 的错误路径。
+- 返回字典已包含 `is_mock`（默认 `false`，可控假工具测试显式传 `is_mock=True`）和 `elapsed_seconds`，与 `docs/interfaces.md` 对齐。
+- 即使输入校验提前失败，也会统一写出 `run_metadata.json`、`verify.log` 和 `verify_result.json`，便于 A 统一归档。
 - `run_dir`（运行目录）默认使用 UTC 时间戳和随机后缀。A 应显式传入包含 `case_id` 和 `iteration` 的目录，确保候选、日志和 C 的评估报告可以对应起来。

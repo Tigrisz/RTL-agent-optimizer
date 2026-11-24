@@ -39,6 +39,8 @@ class VerificationConfig:
     reset: Optional[str] = None
     reset_active_low: bool = False
     induction_steps: int = 4
+    seed: int = 42
+    is_mock: bool = False
 
     def __post_init__(self) -> None:
         self.extra_sources = tuple(path.expanduser().resolve() for path in _as_path_tuple(self.extra_sources))
@@ -73,6 +75,7 @@ def find_tools_env(start: Optional[Path] = None) -> Dict[str, str]:
     if start is not None:
         candidates.append(Path(start) / "tools.env")
     candidates.append(Path.cwd() / "tools.env")
+    candidates.append(Path(__file__).resolve().parents[2] / "tools.env")
     for candidate in candidates:
         values = parse_env_file(candidate)
         if values:

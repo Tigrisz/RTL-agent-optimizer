@@ -1,17 +1,11 @@
-"""Test-only temporary directories under the writable repository workspace."""
+"""Test-only temporary directories using the OS temp folder (no repo clutter)."""
 
 from contextlib import contextmanager
-import shutil
-import tempfile
 from pathlib import Path
+import tempfile
 
 
 @contextmanager
 def workspace_tempdir():
-    root = Path(__file__).resolve().parents[2] / ".test-tmp"
-    root.mkdir(parents=True, exist_ok=True)
-    path = Path(tempfile.mkdtemp(dir=str(root)))
-    try:
-        yield path
-    finally:
-        shutil.rmtree(str(path), ignore_errors=True)
+    with tempfile.TemporaryDirectory(prefix="rtl-verify-test-") as tmp:
+        yield Path(tmp)

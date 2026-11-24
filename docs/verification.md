@@ -4,6 +4,8 @@
 
 ## 调用方式
 
+### Python API
+
 ```python
 from src.verification import VerificationConfig, verify
 
@@ -18,32 +20,42 @@ result = verify(
 )
 ```
 
-`VerificationConfig` 支持多文件设计（`extra_sources`）、头文件目录（`include_dirs`）、宏定义（`defines`）以及工具路径。工具路径按“配置对象 > 进程环境变量 > `tools.env` > PATH”解析；环境变量名称分别是 `YOSYS_BIN`、`IVERILOG_BIN` 和 `VVP_BIN`。
+### 命令行入口（CLI）
+
+```bash
+python -m src.verification golden.v candidate.v --top TopModule --mode formal --run-dir runs/verify_demo
+```
+
+`VerificationConfig` 支持多文件设计（`extra_sources`）、头文件目录（`include_dirs`）、宏定义（`defines`）、随机激励种子（`seed`，自动替换 testbench 中的 `__SEED__`）、`is_mock` 标记以及工具路径。工具路径按“配置对象 > 进程环境变量 > `tools.env` > PATH”解析；环境变量名称分别是 `YOSYS_BIN`、`IVERILOG_BIN` 和 `VVP_BIN`。
 
 ## 验证模式
 
-- `formal`：使用 Yosys 读取 golden 和 candidate，构造 `$equiv` 电路并运行 `equiv_simple`；组合逻辑成功结果的 `proof_level` 为 `formal`。
-- `simulation`：使用 Icarus Verilog/VVP 对同一个 testbench 分别运行 golden 和 candidate，并比较指定观测信号的完整 VCD 波形。必须显式提供 `testbench` 和 `observed_outputs`，否则不能判断回归结果。
-- `both`：先通过 Yosys，再通过 bounded simulation；两者都成功才返回成功。
-
-顺序逻辑需要显式设置 `sequential=True` 和 `clock`。当前后端使用有限步数的 `equiv_simple/equiv_induct` 检查，因此成功结果标记为 `bounded-formal`，不把有限步归纳结果误报成无界证明。`reset`、`reset_active_low` 会写入运行元数据，具体复位假设应由后续时序约束和 testbench 明确表达。
+- `formal`：
+  - **组合电路**（`sequential=False`）：使用 Yosys 构建 `miter -equiv -flatten -make_outputs gold gate miter`，并运行 `sat -verify -prove trigger 0 -show-inputs -show-outputs -set-def-inputs miter`。既可直接证明不同实现结构（如行为级 vs 纹波进位加减器、行为级 vs 移位加法乘法器）的形式等价（`proof_level="formal"`），也能在不等价时输出具体 SAT 反例信号表。
+  - **时序电路**（`sequential=True`，需显式设置 `clock`）：在 `proc; flatten;` 后自动执行 `async2sync` 以兼容异步复位寄存器（`$adff`），再执行有限步 `equiv_simple/equiv_induct` 和 `equiv_status -assert`，成功结果标记为 `proof_level="bounded-formal"`。若归纳阶段存在未证明单元（`unproven`），在剩余超时预算内自动追加有界 `miter + sat -seq` 反例搜索（支持根据 `reset`/`reset_active_low` 施加复位约束），命中反例则精确分类为 `not_equivalent`，未命中反例则保持保守的 `error / unproven`，不误报为等价。
+- `simulation`：使用 Icarus Verilog/VVP 对同一个 testbench 分别运行 golden 和 candidate，替换 `__VCD__` / `` `VCD_PATH `` / `__SEED__`，按 IEEE 1364 位宽左扩展规则解析 VCD（保留共享 symbol 的别名信号，并折叠同时间戳的零延时 delta 周期毛刺与冗余无变化事件），逐信号比对 `observed_outputs`，不一致时报告首个分歧时间戳及 golden/candidate 信号值。必须显式提供 `testbench` 和 `observed_outputs`。
+- `both`：先通过 Yosys 形式验证，再通过 bounded simulation；两者都成功才返回成功（`formal+bounded-simulation` 或 `bounded-formal+bounded-simulation`）。
 
 ## 结果契约
 
-`verify` 返回 JSON-compatible 字典，至少包含：
+`verify` 返回 JSON-compatible 字典，包含：
 
 | 字段 | 含义 |
 | --- | --- |
 | `status` | `success`、`failed`、`error` 或 `timeout` |
 | `equivalent` | 成功为 `true`，确认不等价为 `false`，工具错误/超时为 `null` |
-| `error_type` | 例如 `not_equivalent`、`tool_error`、`timeout`、`missing_observation` |
-| `error_log` | 面向调用者的诊断摘要 |
-| `log_path` | 完整日志路径 |
+| `error_type` | 例如 `not_equivalent`、`syntax_error`、`interface_mismatch`、`missing_top`、`unproven`、`unsupported`、`tool_error`、`timeout`、`missing_observation` |
+| `error_log` | 面向 A/D 反馈的精简诊断摘要（如 SAT 反例信号、报错行或 VCD 首个分歧时刻） |
+| `log_path` | 完整工具日志路径 |
+| `verification_method` | 例如 `yosys-formal`、`iverilog-regression`、`yosys-formal+iverilog-regression` |
+| `proof_level` | 例如 `formal`、`bounded-formal`、`bounded-simulation`、`formal+bounded-simulation` |
+| `is_mock` | 真实工具为 `false`，可控假工具/模拟为 `true` |
+| `elapsed_seconds` | 本次验证耗时（秒） |
 
-`success` 只在后端明确报告证明完成或回归波形一致时产生；Yosys 返回空成功码、unproven、unknown 或 unsupported 都会分类为 `error`，避免把工具异常当成等价。
+`success` 只在后端明确报告证明完成或回归波形一致时产生；语法错误、端口不匹配、缺少顶层、unproven、unsupported、空成功码或超时都会保持 `equivalent=null`，避免把工具异常误判为等价或不等价。
 
-## 与其他任务联调
+## 与其他任务联调及真实工具验证状态
 
-任务 A 只需把候选 RTL 路径传给 `verify` 并读取返回字典。建议将 `run_dir` 绑定到该轮优化的唯一目录，保留 `run_metadata.json`、`equivalence.ys`、`yosys.log`、回归编译/运行日志及 `verify_result.json`。任务 C/D 可以直接读取 `status`、`equivalent`、`proof_level` 和 `error_type`，不需要解析 Yosys 文本。
-
-当前仓库没有随源码提供公开 benchmark RTL，且本机 Windows PATH/WSL 环境尚未能启动 Yosys 和 Icarus；因此单元测试使用可控的假工具覆盖接口、脚本生成、超时、分类和 VCD 比较。接入真实工具后，应再用 Demo 之外的组合和时序样例执行一次端到端回归，并把真实日志留在对应 run 目录中。
+- 任务 A 只需把 golden/candidate RTL 路径和配置传给 `verify`（或通过 CLI 调用）并读取返回字典；即使输入校验提前失败也会写入 `run_metadata.json`、`verify.log` 和 `verify_result.json`。
+- 已在 **WSL2（Yosys 0.52 + Icarus Verilog 12.0 + VVP）** 完成端到端验证，覆盖课程 Demo（`opti_demo`）中的组合电路（`addsubz`、`opt_top`、`popcount3`、`mux2to1v`、`mult8`）与时序电路（`mac8`、`gcd` 以及带异步复位的累加器），以及不等价反例、端口不匹配、语法错误和超时场景。
+- 待课程 8 个公开 benchmark RTL 正式导入 `benchmarks/public/` 后，补充全部公开用例（特别是 4 个时序电路）的统一回归测试清单。

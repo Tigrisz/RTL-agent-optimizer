@@ -26,6 +26,8 @@ class VerificationResult:
     log_path: Optional[str]
     verification_method: Optional[str] = None
     proof_level: Optional[str] = None
+    is_mock: bool = False
+    elapsed_seconds: Optional[float] = None
 
     def __post_init__(self) -> None:
         if self.status not in VALID_STATUSES:
@@ -47,6 +49,8 @@ class VerificationResult:
         status: str = "error",
         verification_method: Optional[str] = None,
         proof_level: Optional[str] = None,
+        is_mock: bool = False,
+        elapsed_seconds: Optional[float] = None,
     ) -> "VerificationResult":
         return cls(
             status=status,
@@ -56,6 +60,8 @@ class VerificationResult:
             log_path=log_path,
             verification_method=verification_method,
             proof_level=proof_level,
+            is_mock=is_mock,
+            elapsed_seconds=elapsed_seconds,
         )
 
     def to_dict(self) -> Dict[str, Any]:
