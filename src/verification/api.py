@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import time
 import uuid
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Mapping, Optional, Union
 
 from .config import VerificationConfig, probe_tool_version, resolve_command
 from .regression import run_regression
@@ -113,19 +113,45 @@ def _input_error(
 def verify(
     golden_rtl: Union[str, Path],
     candidate_rtl: Union[str, Path],
-    config: Optional[VerificationConfig] = None,
+    config: Optional[Union[VerificationConfig, Mapping[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Verify one candidate against the immutable original RTL.
 
     The function is intentionally synchronous so A can use it as one atomic
     step in its iteration state machine.  It returns only JSON-compatible
-    values and writes the complete run artifacts before returning.
+    values and writes the complete run artifacts before returning.  ``config``
+    may be omitted, a :class:`VerificationConfig`, or a plain ``dict``.
     """
     started = time.monotonic()
-    config = config or VerificationConfig()
-    run_dir = _run_dir(config)
     golden = Path(golden_rtl).expanduser().resolve()
     candidate = Path(candidate_rtl).expanduser().resolve()
+
+    if config is None:
+        resolved_config = VerificationConfig()
+    elif isinstance(config, VerificationConfig):
+        resolved_config = config
+    elif isinstance(config, Mapping):
+        try:
+            resolved_config = VerificationConfig.from_mapping(config)
+        except (TypeError, ValueError) as exc:
+            fallback = VerificationConfig()
+            run_dir = _run_dir(fallback)
+            return _input_error(run_dir, golden, candidate, fallback, "invalid_input", "invalid config mapping: %s" % exc, started)
+    else:
+        fallback = VerificationConfig()
+        run_dir = _run_dir(fallback)
+        return _input_error(
+            run_dir,
+            golden,
+            candidate,
+            fallback,
+            "invalid_input",
+            "config must be VerificationConfig, dict, or None",
+            started,
+        )
+
+    config = resolved_config
+    run_dir = _run_dir(config)
 
     if config.mode not in _MODES:
         return _input_error(run_dir, golden, candidate, config, "invalid_input", "unsupported verification mode: %s" % config.mode, started)

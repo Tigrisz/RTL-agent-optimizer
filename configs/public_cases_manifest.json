@@ -1,0 +1,187 @@
+{
+  "schema_version": "1.0",
+  "source_repo": "https://github.com/alex00153/opti_demo",
+  "source_commit": "f6380d5",
+  "verified_toolchain": {
+    "yosys": "Yosys 0.71+101",
+    "iverilog": "Icarus Verilog 12.0"
+  },
+  "cases": [
+    {
+      "case_id": "case1",
+      "type": "combinational",
+      "top": "barrel_shifter",
+      "rtl_relpath": "case/case1/rtl.v",
+      "testbench_relpath": "case/tb/case1_tb.v",
+      "sequential": false,
+      "clock": null,
+      "reset": null,
+      "reset_active_low": false,
+      "observed_outputs": [
+        "out"
+      ],
+      "parameters": {},
+      "systemverilog": false,
+      "multi_module": true,
+      "recommended_mode": "both",
+      "recommended_induction_steps": null,
+      "notes": "Contains submodule mux2X1 in the same file; C should flatten before stat -liberty or match top module chip area."
+    },
+    {
+      "case_id": "case2",
+      "type": "combinational",
+      "top": "fp_rounding",
+      "rtl_relpath": "case/case2/rtl.v",
+      "testbench_relpath": "case/tb/case2_tb.v",
+      "sequential": false,
+      "clock": null,
+      "reset": null,
+      "reset_active_low": false,
+      "observed_outputs": [
+        "abs_rounded_o",
+        "sign_o",
+        "exact_zero_o"
+      ],
+      "parameters": {
+        "DAT_WIDTH": 24
+      },
+      "systemverilog": false,
+      "multi_module": false,
+      "recommended_mode": "both",
+      "recommended_induction_steps": null,
+      "notes": "Default case for rnd_mode_i > 4 assigns 1'bx; preset testbench constrains rnd_mode_i to 0..4."
+    },
+    {
+      "case_id": "case3",
+      "type": "combinational",
+      "top": "fixed_point_subtractor",
+      "rtl_relpath": "case/case3/rtl.v",
+      "testbench_relpath": "case/tb/case3_tb.v",
+      "sequential": false,
+      "clock": null,
+      "reset": null,
+      "reset_active_low": false,
+      "observed_outputs": [
+        "c"
+      ],
+      "parameters": {
+        "Q": 15,
+        "N": 32
+      },
+      "systemverilog": false,
+      "multi_module": false,
+      "recommended_mode": "both",
+      "recommended_induction_steps": null,
+      "notes": "32-bit sign-magnitude fixed-point subtractor."
+    },
+    {
+      "case_id": "case4",
+      "type": "combinational",
+      "top": "div_16bit",
+      "rtl_relpath": "case/case4/rtl.v",
+      "testbench_relpath": "case/tb/case4_tb.v",
+      "sequential": false,
+      "clock": null,
+      "reset": null,
+      "reset_active_low": false,
+      "observed_outputs": [
+        "result",
+        "odd"
+      ],
+      "parameters": {},
+      "systemverilog": true,
+      "multi_module": false,
+      "recommended_mode": "both",
+      "recommended_induction_steps": null,
+      "notes": "Uses SystemVerilog logic and size casts; Yosys requires read_verilog -sv and iverilog requires -g2012."
+    },
+    {
+      "case_id": "case5",
+      "type": "sequential",
+      "top": "verified_accu",
+      "rtl_relpath": "case/case5/rtl.v",
+      "testbench_relpath": "case/tb/case5_tb.v",
+      "sequential": true,
+      "clock": "clk",
+      "reset": "rst_n",
+      "reset_active_low": true,
+      "observed_outputs": [
+        "valid_out",
+        "data_out"
+      ],
+      "parameters": {},
+      "systemverilog": false,
+      "multi_module": false,
+      "recommended_mode": "both",
+      "recommended_induction_steps": 5,
+      "notes": "Async active-low reset ($adff, requires async2sync in Yosys); original RTL contains unused register data_out_reg."
+    },
+    {
+      "case_id": "case6",
+      "type": "sequential",
+      "top": "LIFObuffer",
+      "rtl_relpath": "case/case6/rtl.v",
+      "testbench_relpath": "case/tb/case6_tb.v",
+      "sequential": true,
+      "clock": "clk",
+      "reset": "Rst",
+      "reset_active_low": false,
+      "observed_outputs": [
+        "EMPTY",
+        "FULL",
+        "dataOut"
+      ],
+      "parameters": {},
+      "systemverilog": false,
+      "multi_module": false,
+      "recommended_mode": "both",
+      "recommended_induction_steps": 6,
+      "notes": "Sync active-high reset gated by EN; contains 4x4 register array stack_mem and 4'hx assignment."
+    },
+    {
+      "case_id": "case7",
+      "type": "sequential",
+      "top": "verified_adder_64bit",
+      "rtl_relpath": "case/case7/rtl.v",
+      "testbench_relpath": "case/tb/case7_tb.v",
+      "sequential": true,
+      "clock": "clk",
+      "reset": "rst_n",
+      "reset_active_low": true,
+      "observed_outputs": [
+        "result",
+        "o_en"
+      ],
+      "parameters": {
+        "DATA_WIDTH": 64,
+        "STG_WIDTH": 16
+      },
+      "systemverilog": false,
+      "multi_module": false,
+      "recommended_mode": "both",
+      "recommended_induction_steps": 6,
+      "notes": "64-bit 4-stage pipelined adder with async active-low reset ($adff)."
+    },
+    {
+      "case_id": "case8",
+      "type": "sequential",
+      "top": "verified_radix2_div",
+      "rtl_relpath": "case/case8/rtl.v",
+      "testbench_relpath": "case/tb/case8_tb.v",
+      "sequential": true,
+      "clock": "clk",
+      "reset": "rst",
+      "reset_active_low": false,
+      "observed_outputs": [
+        "res_valid",
+        "result"
+      ],
+      "parameters": {},
+      "systemverilog": false,
+      "multi_module": false,
+      "recommended_mode": "both",
+      "recommended_induction_steps": 10,
+      "notes": "Sync active-high reset; 8-cycle sequential divider FSM; recommend mode='both' with case8_tb.v."
+    }
+  ]
+}

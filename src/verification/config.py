@@ -1,10 +1,10 @@
 """Configuration for the standalone verification worker."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 import os
 from pathlib import Path
 import subprocess
-from typing import Dict, Iterable, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple, Union
 
 
 Command = Union[str, Sequence[str]]
@@ -47,11 +47,47 @@ class VerificationConfig:
     def __post_init__(self) -> None:
         self.extra_sources = tuple(path.expanduser().resolve() for path in _as_path_tuple(self.extra_sources))
         self.include_dirs = tuple(path.expanduser().resolve() for path in _as_path_tuple(self.include_dirs))
+        self.defines = tuple(str(item) for item in self.defines)
         if self.run_dir is not None:
             self.run_dir = Path(self.run_dir).expanduser().resolve()
         if self.testbench is not None:
             self.testbench = Path(self.testbench).expanduser().resolve()
         self.observed_outputs = tuple(str(name) for name in self.observed_outputs)
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "VerificationConfig":
+        """Build a VerificationConfig from a plain dict (e.g. controller/manifest dict).
+
+        Unknown metadata keys (such as ``case_id``, ``notes``, ``parameters``) are
+        ignored so callers can pass a case manifest entry directly without
+        importing :class:`VerificationConfig`.
+        """
+        valid_names = {f.name for f in fields(cls)}
+        kwargs: Dict[str, Any] = {}
+        for key, value in data.items():
+            if key in valid_names:
+                kwargs[key] = value
+
+        if not kwargs.get("top") and data.get("top_module"):
+            kwargs["top"] = data["top_module"]
+        if kwargs.get("induction_steps") is None and data.get("recommended_induction_steps") is not None:
+            kwargs["induction_steps"] = data["recommended_induction_steps"]
+
+        for tuple_key in ("extra_sources", "include_dirs", "defines", "observed_outputs"):
+            if tuple_key in kwargs:
+                raw = kwargs[tuple_key]
+                if raw is None:
+                    kwargs[tuple_key] = ()
+                elif isinstance(raw, (str, Path)):
+                    kwargs[tuple_key] = (raw,)
+                else:
+                    kwargs[tuple_key] = tuple(raw)
+
+        for default_key in ("timeout_seconds", "mode", "sequential", "reset_active_low", "induction_steps", "seed", "is_mock"):
+            if default_key in kwargs and kwargs[default_key] is None:
+                kwargs.pop(default_key)
+
+        return cls(**kwargs)
 
 
 def parse_env_file(path: Path) -> Dict[str, str]:

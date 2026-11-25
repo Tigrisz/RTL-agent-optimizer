@@ -26,7 +26,7 @@ result = verify(
 python -m src.verification golden.v candidate.v --top TopModule --mode formal --run-dir runs/verify_demo
 ```
 
-`VerificationConfig` 支持多文件设计（`extra_sources`）、头文件目录（`include_dirs`）、宏定义（`defines`）、随机激励种子（`seed`，自动替换 testbench 中的 `__SEED__`）、`is_mock` 标记以及工具路径。工具路径按“配置对象 > 进程环境变量 > `tools.env` > PATH”解析；环境变量名称分别是 `YOSYS_BIN`、`IVERILOG_BIN` 和 `VVP_BIN`。
+`verify()` 的第 3 参数 `config` 既可传入 `VerificationConfig` 对象，也可直接传入普通 `dict`（自动兼容 `top_module`/`recommended_induction_steps` 别名并忽略多余元数据字段，方便主控 A 直接透传用例配置清单）。`VerificationConfig` 支持多文件设计（`extra_sources`）、头文件目录（`include_dirs`）、宏定义（`defines`）、随机激励种子（`seed`，自动替换 testbench 中的 `__SEED__`）、`is_mock` 标记以及工具路径。工具路径按“配置对象 > 进程环境变量 > `tools.env` > PATH”解析；环境变量名称分别是 `YOSYS_BIN`、`IVERILOG_BIN` 和 `VVP_BIN`。
 
 ## 验证模式
 
