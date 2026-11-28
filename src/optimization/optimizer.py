@@ -12,8 +12,16 @@ import socket
 from urllib import error, parse, request
 from uuid import uuid4
 
+from .feedback import performance_summary
+from .structures import module_headers, opportunities
+
 
 STRATEGIES = {
+    "pipeline_partial_sum": "检查目标操作数是否在相同使能、复位和有效拍下传递，迟到项是否单比特进位。若成立，在延迟线前计算扩位局部和，延迟该和，在原级补进位。保留空拍输出、吞吐与参数语义。",
+    "pipeline_block_carry": "针对目标段尝试分块预计算局部和与进位传播条件，在原级合并迟到的进位；检查校正链深度、寄存位数、复位和气泡行为。",
+    "shared_add_sub": "核对所列两个操作数的加减法是否互斥且宽度兼容。尝试共用一条受控加减链，保留比较、符号、截断、回绕为零等边界行为。",
+    "parallel_sign_control": "保留并行的和与差以缩短控制到进位的路径，提取重复比较、符号选择和零判定；核对等幅及溢出边界。",
+    "repair_interface": "按原顶层、参数、端口与语法定位验证器报告的问题，仅修复出错片段。",
     "area_simplify": "保守简化组合表达式、常量与冗余逻辑，保持位宽及符号语义。",
     "resource_share": "仅在运算互斥且位宽、符号兼容时尝试共享；新增选择器可能恶化关键路径，不增加周期。",
     "timing_restructure": "检查关键路径和运算树结构，在不改变周期行为的前提下改善时序。",
@@ -23,14 +31,28 @@ STRATEGIES = {
 }
 
 
-def select_strategy(feedback):
+def select_strategy(feedback, plans=None, performance=None):
     verify = feedback.get("verify") or {}
     evaluate = feedback.get("evaluate") or {}
     if verify.get("status") == "failed" and verify.get("equivalent") is False:
         return "repair_equivalence"
-    if evaluate.get("status") == "success" and evaluate.get("timing_met") is False:
-        return "timing_restructure"
     tried = feedback.get("tried_strategies") or []
+    if verify.get("status") == "error" and verify.get("error_type") in (
+            "syntax_error", "missing_top", "interface_mismatch"):
+        return "repair_interface"
+    metrics = (performance or {}).get("metrics", {})
+    slack = metrics.get("slack", {}).get("candidate")
+    depth_change = metrics.get("logic_depth", {}).get("delta")
+    plans = plans or {}
+    timing_met = evaluate.get("timing_met") if performance is None else performance.get("timing_met")
+    if evaluate.get("status") == "success" and (
+            timing_met is False or (slack is not None and slack < 0)
+            or (slack is None and depth_change is not None and depth_change > 0)):
+        return next((s for s in ("pipeline_block_carry", "parallel_sign_control")
+                     if s in plans and s not in tried), "timing_restructure")
+    for strategy in plans:
+        if strategy not in tried:
+            return strategy
     return next((s for s in ("area_simplify", "resource_share", "arithmetic_restructure", "control_simplify") if s not in tried),
                 "area_simplify")
 
@@ -63,13 +85,14 @@ def compact_data(value, depth=0):
     return value
 
 
-def build_prompt(rtl, feedback, strategy, context=None, history=None):
+def build_prompt(rtl, feedback, strategy, context=None, history=None, guidance=None):
     template = Path(__file__).with_name("prompts").joinpath("rtl_optimize.md").read_text(encoding="utf-8")
     values = {"RTL_SOURCE": rtl, "FEEDBACK": json.dumps(compact_data(feedback), ensure_ascii=False),
               "CONTEXT": json.dumps(context or {}, ensure_ascii=False),
+              "GUIDANCE": json.dumps(compact_data(guidance or {}), ensure_ascii=False),
               "HISTORY": json.dumps(compact_data(history or []), ensure_ascii=False),
               "STRATEGY": strategy + ": " + STRATEGIES[strategy]}
-    return re.sub(r"\{\{(RTL_SOURCE|FEEDBACK|STRATEGY|CONTEXT|HISTORY)\}\}",
+    return re.sub(r"\{\{(RTL_SOURCE|FEEDBACK|STRATEGY|CONTEXT|HISTORY|GUIDANCE)\}\}",
                   lambda match: values[match[1]], template)
 
 
@@ -120,6 +143,27 @@ def extract_rtl(output):
     if not tokens or len(tokens) % 2 or tokens != ["module", "endmodule"] * (len(tokens) // 2):
         return None
     return rtl + "\n", ".sv" if blocks[0][0].lower() == "systemverilog" else ".v"
+
+
+def extract_candidate(output, source, suffix):
+    """Optionally apply one uniquely anchored local edit to this exact parent."""
+    if not output.lstrip().startswith("```json"):
+        return extract_rtl(output)
+    block = re.fullmatch(r"\s*`{3}json\s*\n(.*?)\n\s*`{3}\s*", output, re.DOTALL)
+    if not block:
+        return None
+    try:
+        edit = json.loads(block[1])
+    except ValueError:
+        return None
+    if not isinstance(edit, dict) or set(edit) != {"old", "new"}:
+        return None
+    old, new = edit["old"], edit["new"]
+    if not isinstance(old, str) or not old.strip() or not isinstance(new, str) or source.count(old) != 1:
+        return None
+    language = "systemverilog" if suffix.lower() == ".sv" else "verilog"
+    code = source.replace(old, new, 1)
+    return extract_rtl(f"```{language}\n{code}\n```")
 
 
 def source_hash(source):
@@ -195,7 +239,8 @@ def optimize(current_rtl, feedback=None, *, output_dir="runs/optimization", env_
         # Strictly bound supplied feedback, then compact log/history portions in prompts.
         if len(json.dumps(feedback, allow_nan=False)) > 64000:
             raise ValueError()
-        result["feedback_is_mock"] = feedback.get("is_mock") is True
+        result["feedback_is_mock"] = any(item.get("is_mock") is True for item in
+                                         (feedback, feedback.get("verify") or {}, feedback.get("evaluate") or {}))
         rtl = Path(current_rtl).read_text(encoding="utf-8-sig")
         if not rtl.strip() or len(rtl) > 64000:
             raise ValueError()
@@ -220,13 +265,18 @@ def optimize(current_rtl, feedback=None, *, output_dir="runs/optimization", env_
         tried = list(dict.fromkeys(feedback.get("tried_strategies", []) +
                                   [h["strategy"] for h in history if h.get("status") == "success"]))
         combined_feedback = {**feedback, "tried_strategies": tried}
-        result["strategy"] = select_strategy(combined_feedback)
+        plans = opportunities(rtl)
+        performance = performance_summary(feedback, context)
+        result["strategy"] = select_strategy(combined_feedback, plans, performance)
+        guidance = {"target": plans.get(result["strategy"]), "performance": performance,
+                    "feedback_candidate_id": feedback.get("candidate_id"),
+                    "feedback_is_mock": result["feedback_is_mock"]}
         recent = [{k: h.get(k) for k in ("run_id", "strategy", "status", "candidate_hash", "is_duplicate", "feedback_is_mock")}
                   for h in history[-6:]]
-        prompt = build_prompt(rtl, combined_feedback, result["strategy"], context, recent)
+        prompt = build_prompt(rtl, combined_feedback, result["strategy"], context, recent, guidance)
         input_info = {"scope": scope, "context_hash": context_hash, "source_path": str(Path(current_rtl).resolve()),
                       "source_hash": source_hash(rtl), "context": context,
-                      "feedback": compact_data(combined_feedback)}
+                      "guidance": compact_data(guidance), "feedback": compact_data(combined_feedback)}
     except (OSError, UnicodeError, ValueError, TypeError):
         return fail("input_error", "Check RTL (1..64000 characters), context/feedback JSON and history file.")
     try:
@@ -279,10 +329,17 @@ def optimize(current_rtl, feedback=None, *, output_dir="runs/optimization", env_
         return fail("config_error", "Supported backends: custom, mock.")
     if not output.strip():
         return fail("empty_output", "Model returned empty content.", "failed")
-    extracted = extract_rtl(output)
+    extracted = extract_candidate(output, rtl, Path(current_rtl).suffix)
     if extracted is None:
-        return fail("extraction_failed", "Expected one labeled RTL block with complete module boundaries.", "failed")
+        return fail("extraction_failed", "Expected complete RTL or a single uniquely anchored JSON edit.", "failed")
     code, extension = extracted
+    top = context.get("top")
+    if mode == "custom" and isinstance(top, str):
+        original = module_headers(rtl)
+        if top in original:
+            headers = module_headers(code)
+            if next(iter(headers), None) != top or rtl_fingerprint(headers[top]) != rtl_fingerprint(original[top]):
+                return fail("interface_changed", "Keep the selected top first and preserve its module header.", "failed")
     try:
         candidate = run_dir / ("candidate" + extension)
         candidate.write_text(code, encoding="utf-8")

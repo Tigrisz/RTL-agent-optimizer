@@ -48,16 +48,16 @@ result = optimize(current_rtl, feedback)  # 兼容原有两个位置参数，fee
 }
 ```
 
-策略优先级：明确不等价时 `repair_equivalence`；评估成功且时序不满足时
-`timing_restructure`；否则在 `area_simplify`、`resource_share` 中选择未尝试策略。
-再按未尝试顺序探索 arithmetic_restructure、control_simplify；全部尝试后回到保守简化。
+验证反例触发功能修复，语法或接口错误触发局部修复。模块在源码中定位互斥加减或延迟操作数加进位的结构，按目标信号选择面积或时序策略。未匹配时沿用通用策略。
+
+可同时传入 `feedback.baseline` 和 `feedback.evaluate`。当前 C 的无单位 `delay` 按逻辑深度（级）处理。使用同一配置的基线和候选；可在两者写入相同的 `config_id` 标识配置。可选的静态时序结果放在 `evaluate.sta`，例如 `{"status":"success","unit":"ns","path_delay":2.3,"slack":-0.3,"startpoint":"r1/Q","endpoint":"r2/D"}`。示例数值仅用于说明字段。D 把指标、变化量及识别的目标信号写入提示词和 `record.json` 的 `guidance` 字段。
 策略均为待检验假设，不保证收益，不根据案例名称硬编码。
 工具执行错误不会被当作不等价。反馈上限 64000 字符，进入 prompt 的长日志截断至 1500 字符，列表只保留最后 6 项。
 完整 RTL 不截断；单文件源码超过 64000 字符时返回 input_error。
 
 模板沿用 `tmp/opti_demo/prompts/rtl_optimize.md` 的面积优先、保持接口和单代码块要求，
 在正式模块中扩展反馈与周期语义约束，不依赖 tmp 文件。不按案例名选择或硬编码提示词。
-只接受一个 verilog/systemverilog 代码块，并检查 module/endmodule 成对；这不是语法解析、
+模型可返回一个 verilog/systemverilog 代码块，也可返回单个 JSON 代码块，使用 `old` 和 `new` 精确替换在输入中只出现一次的片段。两种输出均重建完整候选并检查 module/endmodule 成对；这不是语法解析、
 完整性证明或功能验证。context 可记录参数与约束，但不会执行 elaboration、展开 include 或自动收集多文件依赖，不应直接用于复杂工程闭环。
 
 2026-10-14 检查：7 项 unittest 通过，包含 HTTP 适配器模拟、反馈策略、错误分类、
