@@ -1,104 +1,118 @@
-# src/evaluation/evaluator.py
+import subprocess
+import tempfile
 import os
 import re
-import signal
-from pyosys import libyosys as ys
+import time
+import logging
+from pathlib import Path
+from dotenv import load_dotenv
 
-# 简单的超时控制类（防止大模型写了死循环卡死）
-class TimeoutError(Exception): pass
-def timeout_handler(signum, frame):
-    raise TimeoutError("Yosys 运行超时")
+# --- 环境配置加载 ---
+_project_root = Path(__file__).resolve().parent.parent.parent
+load_dotenv(_project_root / ".env")
+load_dotenv(_project_root / "tools.env", override=True)
 
-def evaluate(rtl: str, constraints: dict) -> dict:
+YOSYS_BIN = os.getenv("YOSYS_BIN")
+LIBERTY_FILE = os.getenv("LIB_FILE")
+
+if not YOSYS_BIN or not Path(YOSYS_BIN).exists():
+    raise RuntimeError(f"Yosys 路径未正确配置 (tools.env -> YOSYS_BIN): {YOSYS_BIN}")
+if not LIBERTY_FILE or not Path(LIBERTY_FILE).exists():
+    raise RuntimeError(f"Liberty 文件路径未正确配置 (tools.env -> LIBERTY_FILE): {LIBERTY_FILE}")
+
+logger = logging.getLogger(__name__)
+
+def evaluate(rtl_path: str, constraints: dict) -> dict:
     """
-    综合评估接口
+    模块 C：调用 Yosys 评估 RTL 的面积和逻辑深度。
     """
-    # 1. 初始化兜底返回值
-    result = {
-        "status": "error",
-        "area": None,
-        "delay": None,
-        "timing_met": None,
-        "report_path": None
-    }
-
-    # 2. 解析参数
-    lib = constraints.get("liberty")
-    clock_ns = constraints.get("clock_period")
-    top_module = constraints.get("top_module")
-    report_dir = constraints.get("report_dir", "reports")
+    start_time = time.time()
     
-    if not lib or not os.path.exists(lib):
-        print(f"[Evaluate] Error: Liberty file not found at {lib}")
-        return result
+    delay_limit = constraints.get("delay_limit") if constraints else None
     
-    # 单位统一转为 ps
-    period_ps = int(clock_ns * 1000) if clock_ns else None
-
-    # 3. 准备报告目录
-    os.makedirs(report_dir, exist_ok=True)
-    stat_log = os.path.join(report_dir, "stat.log")
-    ltp_log = os.path.join(report_dir, "ltp.log")
-
-    # 设置 60 秒超时
-    signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(60)
-
+    top_module = None
     try:
-        design = ys.Design()
-        
-        # --- 综合流程 ---
-        ys.run_pass(f"read_verilog {rtl}", design)
-        if top_module:
-            ys.run_pass(f"hierarchy -check -top {top_module}", design)
+        rtl_content = Path(rtl_path).read_text()
+        # 匹配 module 后面的第一个单词作为模块名
+        match = re.search(r"module\s+(\w+)", rtl_content)
+        if match:
+            top_module = match.group(1)
         else:
-            ys.run_pass("hierarchy -check -auto-top", design)
-            
-        ys.run_pass("proc; opt; memory; opt", design)
-        
-        ys.run_pass("techmap; opt", design) 
-        
-        # 工艺映射
-        ys.run_pass(f"read_liberty -lib {lib}", design)
-        ys.run_pass(f"dfflibmap -liberty {lib}", design)
-        ys.run_pass("opt", design)
-        
-        if period_ps:
-            ys.run_pass(f"abc -liberty {lib} -D {period_ps}", design)
-        else:
-            ys.run_pass(f"abc -liberty {lib}", design)
-        ys.run_pass("clean", design)
-
-        # --- 提取面积 ---
-        ys.run_pass(f"tee -o {stat_log} stat -liberty {lib}", design)
-        with open(stat_log) as f:
-            m_area = re.search(r"Chip area for module\s+'.*?':\s*([\d.]+)", f.read())
-            if m_area:
-                result["area"] = float(m_area.group(1))
-
-        # --- 提取延时 ---
-        ys.run_pass("flatten", design)
-        ys.run_pass(f"tee -o {ltp_log} ltp -noff", design)
-        with open(ltp_log) as f:
-            m_delay = re.search(r"Longest topological path.*?length\s*=\s*([\d.]+)", f.read())
-            if m_delay:
-                result["delay"] = float(m_delay.group(1))
-
-        # --- 判断逻辑 ---
-        if result["area"] is not None:
-            result["status"] = "success"
-            result["report_path"] = stat_log  # 这里先用 stat_log 作为报告
-
-            if result["delay"] is not None and period_ps:
-                result["timing_met"] = (result["delay"] <= period_ps)
-
-    except TimeoutError:
-        result["status"] = "timeout"
-        print("[Evaluate] Timeout!")
+            # 如果正则没匹配到，说明代码可能被改坏了，或者不是合法的 Verilog
+            logger.error(f"无法从 RTL 文件中解析出模块名: {rtl_path}")
+            return {"status": "error", "area": None, "delay": None, "timing_met": None}
     except Exception as e:
-        print(f"[Evaluate] Yosys Error: {str(e)}")
-        result["status"] = "error"
-    finally:
-        signal.alarm(0) # 取消定时器
+        logger.error(f"读取 RTL 文件失败: {e}")
+        return {"status": "error", "area": None, "delay": None, "timing_met": None}
 
-    return result
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ys_script = Path(tmpdir) / "run.ys"
+        
+        # 使用从环境变量读取的 LIBERTY_FILE
+        yosys_script_content = f"""
+        read_liberty -ignore_miss_func {LIBERTY_FILE}
+        read_verilog -sv {rtl_path}
+        
+        synth -top {top_module} -flatten
+        
+        ltp -noff
+        
+        dfflibmap -liberty {LIBERTY_FILE}
+        abc -liberty {LIBERTY_FILE}
+        
+        stat -liberty {LIBERTY_FILE}
+        """
+        ys_script.write_text(yosys_script_content)
+
+        try:
+            # 使用从环境变量读取的 YOSYS_BIN
+            result = subprocess.run(
+                [YOSYS_BIN, "-s", str(ys_script)],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            save_dir = Path("experiments/reports")
+            save_dir.mkdir(parents=True, exist_ok=True)
+            file_stem = Path(rtl_path).stem
+            # 使用毫秒级时间戳（乘以1000），解决同一秒内覆盖的问题
+            timestamp = int(time.time() * 1000)
+            final_report_path = save_dir / f"{file_stem}_{timestamp}.log"
+            final_report_path.write_text(result.stdout + "\n" + result.stderr)
+            
+            if result.returncode != 0:
+                logger.warning(f"Yosys 综合失败: {result.stderr}")
+                return {"status": "error", "area": None, "delay": None, "timing_met": None, "report_path": str(final_report_path)}
+            
+            output = result.stdout
+            
+            area = None
+            area_match = re.search(r"Chip area for module.*?:\s*([\d\.]+)", output)
+            if area_match:
+                area = float(area_match.group(1))
+            
+            delay = None
+            ltp_match = re.search(r"Longest topological path.*?length=(\d+)", output)
+            if ltp_match:
+                delay = int(ltp_match.group(1))
+
+            timing_met = None
+            if delay_limit is not None and delay is not None:
+                timing_met = bool(delay <= delay_limit)
+            00
+            return {
+                "status": "success",
+                "area": area,
+                "delay": delay,
+                "timing_met": timing_met,
+                "report_path": str(final_report_path),
+                "runtime": round(time.time() - start_time, 2)
+            }
+
+        except subprocess.TimeoutExpired:
+            logger.warning("Yosys 执行超时 (30s)")
+            return {"status": "timeout", "area": None, "delay": None, "timing_met": None, "report_path": None}
+        except Exception as e:
+            logger.error(f"评估过程发生异常: {str(e)}")
+            return {"status": "error", "area": None, "delay": None, "timing_met": None, "report_path": None}
