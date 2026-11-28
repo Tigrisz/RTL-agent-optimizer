@@ -29,3 +29,7 @@ dist/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 评估产生的中间文件和日志
+scratch/reports/
+*.log
